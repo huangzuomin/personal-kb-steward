@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "topic-insight-miner output",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "type", "status", "stage", "sources", "one_sentence_topic", "tension", "why_now", "risks", "gaps", "score", "confidence", "review_required"],
+        "properties": {
+          "title": {"type": "string"},
+          "type": {"const": "topic-card"},
+          "status": {"enum": ["growing", "manual_review"]},
+          "stage": {"enum": ["candidate", "promising"]},
+          "sources": {"type": "array", "items": {"type": "string"}},
+          "one_sentence_topic": {"type": "string"},
+          "tension": {"type": "string"},
+          "why_now": {"type": "array", "items": {"type": "string"}},
+          "angles": {"type": "array", "items": {"type": "string"}},
+          "risks": {"type": "array", "items": {"type": "string"}},
+          "gaps": {"type": "array", "items": {"type": "string"}},
+          "score": {"enum": ["A", "B", "C"]},
+          "confidence": {"enum": ["high", "medium", "low"]},
+          "review_required": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

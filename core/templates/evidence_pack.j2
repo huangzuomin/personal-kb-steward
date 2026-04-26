@@ -1,0 +1,76 @@
+{% include 'base_frontmatter.j2' %}
+# {{ title }}
+
+## 选题边界
+
+{{ topic_scope }}
+
+## 来源范围
+
+{% for src in sources %}- {{ src }}
+{% else %}- 暂无来源。
+{% endfor %}
+
+## 事实
+
+{% for item in facts %}- **来源**：{{ item.source }}｜{{ item.text }}
+{% else %}- 暂未抽取到明确事实。
+{% endfor %}
+
+## 案例
+
+{% for item in cases %}- **来源**：{{ item.source }}｜{{ item.text }}
+{% else %}- 暂未抽取到足够明确的案例。
+{% endfor %}
+
+## 数据
+
+{% for item in data_points %}- {{ item }}
+{% else %}- 暂未找到可用数据。
+{% endfor %}
+
+## 人物/机构
+
+{% for item in people_orgs %}- {{ item }}
+{% else %}- 暂未识别到关键人物或机构。
+{% endfor %}
+
+## 时间线
+
+{% for item in timeline %}- {{ item }}
+{% else %}- 暂未识别到明确时间线。
+{% endfor %}
+
+## 反方观点
+
+{% for item in counter_views %}- {{ item }}
+{% else %}- 需要人工确认是否存在反方来源。
+{% endfor %}
+
+## 可引用片段候选
+
+{% for item in quotable %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 证据强度
+
+{{ evidence_strength }}
+
+## 来源限制
+
+{% for item in source_limits %}- {{ item }}
+{% else %}- 需要人工回到原文确认上下文。
+{% endfor %}
+
+## 待补缺口
+
+{% for item in gaps %}- {{ item }}
+{% else %}- 暂未识别到明显缺口。
+{% endfor %}
+
+## 人工复核项
+
+{% for item in manual_review %}- {{ item }}
+{% else %}- 暂无明显复核项。
+{% endfor %}

@@ -1,0 +1,44 @@
+{
+  "version": 2,
+  "default_entry": "organize_kb",
+  "routes": [
+    {
+      "entry": "healthcheck",
+      "primary_skill": "kb-lint-healthcheck",
+      "match_any": ["检查", "健康", "体检", "lint", "health", "断链", "重复", "过期", "腐烂", "质量", "风险"]
+    },
+    {
+      "entry": "weave_work_memory",
+      "primary_skill": "work-memory-weave",
+      "match_any": ["工作记忆", "沉淀工作", "会议", "周报", "项目", "复盘", "决定", "决策", "待办", "时间线", "decision", "timeline", "review"]
+    },
+    {
+      "entry": "discover_topics",
+      "primary_skill": "topic-insight-miner",
+      "match_any": ["发现选题", "选题", "洞察", "值得写", "题目", "写什么", "发现主题", "topic", "idea"]
+    },
+    {
+      "entry": "prepare_writing",
+      "primary_skill": "writing-material-pack",
+      "match_any": ["准备写作素材", "写作素材", "材料包", "写作准备", "写作结构", "组稿", "成稿前", "素材包", "material pack"]
+    },
+    {
+      "entry": "organize_kb",
+      "primary_skill": "mindseed-grow",
+      "match_any": ["整理知识库", "整理", "碎片", "随手记", "quicknote", "inbox", "seed", "生长"]
+    }
+  ],
+  "legacy_skill_aliases": {
+    "kb-lint-healthcheck": "healthcheck",
+    "work-memory-weave": "weave_work_memory",
+    "topic-insight-miner": "discover_topics",
+    "writing-evidence-harvester": "prepare_writing",
+    "writing-material-pack": "prepare_writing",
+    "knowledge-gap-finder": "discover_topics",
+    "claim-evidence-checker": "prepare_writing",
+    "case-story-bank-builder": "prepare_writing",
+    "project-review-synthesizer": "weave_work_memory",
+    "topic-research-compile": "discover_topics",
+    "mindseed-grow": "organize_kb"
+  }
+}

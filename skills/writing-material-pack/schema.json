@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "writing-material-pack output",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "type", "status", "stage", "sources", "topic", "tension", "facts", "cases", "risks", "gaps", "not_recommended", "confidence", "review_required"],
+        "properties": {
+          "title": {"type": "string"},
+          "type": {"const": "material-pack"},
+          "status": {"enum": ["growing", "compiled", "manual_review"]},
+          "stage": {"enum": ["assembling", "draft_ready", "insufficient"]},
+          "sources": {"type": "array", "items": {"type": "string"}},
+          "topic": {"type": "string"},
+          "tension": {"type": "string"},
+          "facts": {"type": "array", "items": {"type": "string"}},
+          "cases": {"type": "array", "items": {"type": "string"}},
+          "risks": {"type": "array", "items": {"type": "string"}},
+          "gaps": {"type": "array", "items": {"type": "string"}},
+          "not_recommended": {"type": "array", "items": {"type": "string"}},
+          "confidence": {"enum": ["high", "medium", "low"]},
+          "review_required": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

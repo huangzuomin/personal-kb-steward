@@ -1,0 +1,91 @@
+{% include 'base_frontmatter.j2' %}
+# {{ title }}
+
+## 选题
+
+{{ topic_title }}
+
+## 核心张力
+
+{{ core_tension }}
+
+## 可用事实
+
+{% for item in facts %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 可用案例
+
+{% for item in cases %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 可用数据
+
+{% for item in data_points %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 时间线
+
+{% for item in timeline %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 关键人物/机构
+
+{% for item in people_orgs %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 正反观点
+
+### 支持方
+
+{% for item in pro_views %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+### 反方
+
+{% for item in counter_views %}- {{ item }}
+{% else %}- 需要补充反方来源后再写。
+{% endfor %}
+
+## 风险与缺口
+
+{% for item in risks_and_gaps %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 可选结构
+
+{% for item in writing_angles %}### 角度 {{ loop.index }}：{{ item.angle }}
+
+- **核心论点**：{{ item.core_claim }}
+- **所需证据**：{{ item.required_evidence }}
+- **风险**：{{ item.risk }}
+
+{% else %}- 暂无可选结构。
+{% endfor %}
+
+## 不建议写法
+
+{% for item in dont_write %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 写作前检查清单
+
+{% for item in pre_write_checklist %}- [ ] {{ item }}
+{% else %}- [ ] 确认核心论点有至少 2 个独立来源支撑。
+- [ ] 确认反方观点已纳入。
+- [ ] 确认所有案例上下文已回到原文确认。
+{% endfor %}
+
+## 人工复核项
+
+{% for item in manual_review %}- {{ item }}
+{% else %}- 暂无明显复核项。
+{% endfor %}

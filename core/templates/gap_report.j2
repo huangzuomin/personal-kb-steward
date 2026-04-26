@@ -1,0 +1,31 @@
+{% include 'base_frontmatter.j2' %}
+# {{ title }}
+
+## 当前主题
+
+{{ current_topic }}
+
+## 已有证据
+
+{% for src in sources %}- {{ src }}
+{% else %}- 暂无可用来源。
+{% endfor %}
+
+## 缺口清单
+
+{% for item in gap_items %}### 缺口 {{ loop.index }}：{{ item.type }}
+
+- **描述**：{{ item.description }}
+- **优先级**：{{ item.priority }}
+- **不补的风险**：{{ item.risk }}
+- **推荐补充路径**：{{ item.suggested_path }}
+- **可交给**：{{ item.next_skill }}
+
+{% else %}- 暂未识别到明显缺口。
+{% endfor %}
+
+## 人工复核项
+
+{% for item in manual_review %}- {{ item }}
+{% else %}- 暂无明显复核项。
+{% endfor %}

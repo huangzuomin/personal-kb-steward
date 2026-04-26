@@ -1,0 +1,92 @@
+{
+  "agent": "personal-kb-steward",
+  "agent_name_cn": "个人知识库管家",
+  "llm": {
+    "provider": "openai-compatible",
+    "base_url": "https://api.openai.com/v1",
+    "model": "",
+    "api_key_env": "OPENAI_API_KEY",
+    "temperature": 0.2,
+    "timeout_seconds": 60
+  },
+  "knowledge_base": "${AGENT_HOME}\\kb-template",
+  "state_file": "${AGENT_HOME}\\.openclaw\\personal-kb-steward-state.json",
+  "scan": {
+    "include_dirs": ["quicknote", "inbox", "raw", "wiki"],
+    "exclude_dirs": [".obsidian", "outputs", "archive"],
+    "extensions": [".md"],
+    "max_files_per_run": 20,
+    "max_source_chars": 6000,
+    "raw_seed_max_chars": 2000,
+    "seed_markers": ["#seed", "#随手记", "#待生长"]
+  },
+  "clustering": {
+    "mode": "dynamic",
+    "max_clusters": 5,
+    "min_sources_for_confident_cluster": 2,
+    "allow_fixed_theme_rules": false
+  },
+  "write": {
+    "seed_dir": "wiki/seeds",
+    "work_memory_dir": "wiki/work-memory",
+    "topics_dir": "wiki/topics",
+    "concepts_dir": "wiki/concepts",
+    "sources_dir": "wiki/sources",
+    "evidence_dir": "wiki/evidence",
+    "materials_dir": "wiki/material-packs",
+    "gaps_dir": "wiki/gaps",
+    "claims_dir": "wiki/claim-checks",
+    "cases_dir": "wiki/cases",
+    "reviews_dir": "wiki/project-reviews",
+    "reports_dir": "outputs",
+    "log_file": "log.md"
+  },
+  "knowledge_model": {
+    "statuses": ["raw", "seed", "growing", "compiled", "linked", "stale", "conflict", "archived", "manual_review"],
+    "types": ["source-note", "seed-card", "literature-note", "atomic-note", "concept-page", "topic-page", "topic-card", "evidence-pack", "material-pack", "work-memory", "decision-record", "case-story", "gap-report", "claim-check", "lint-report", "run-report"],
+    "required_frontmatter": ["title", "type", "status", "stage", "created", "updated", "sources", "related", "tags", "confidence", "review_required"],
+    "legacy_frontmatter": ["source"],
+    "workflow_stages": ["seed", "growing", "compiled", "linked", "merged", "archived", "needs_review", "active", "waiting", "blocked", "done", "candidate", "promising", "ready_for_evidence", "rejected", "collecting", "compiling", "assembling", "draft", "draft_ready", "checking", "verified", "strong", "medium", "weak", "unsupported", "insufficient", "needs_context", "open", "partially_resolved", "resolved", "usable", "validated", "actionable"],
+    "relationship_types": ["source_of", "supports", "contradicts", "extends", "example_of", "part_of", "mentions", "next_step"]
+  },
+  "quality_gate": {
+    "require_frontmatter": true,
+    "require_concrete_sources": true,
+    "require_resolved_links": true,
+    "require_canonical_wikilinks": true,
+    "pending_links_section": "待创建链接",
+    "min_sources_for_topic": 3,
+    "min_evidence_items_for_material_pack": 5,
+    "manual_review_on_unresolved_link": true,
+    "manual_review_on_low_confidence": true
+  },
+  "safety": {
+    "default_mode": "dry-run",
+    "require_apply_flag_for_writes": true,
+    "plans_dir": "${AGENT_HOME}\\.openclaw\\plans",
+    "runs_dir": "${AGENT_HOME}\\.openclaw\\runs",
+    "processed_index": "${AGENT_HOME}\\.openclaw\\processed-index.json",
+    "manual_review_queue": "${AGENT_HOME}\\.openclaw\\manual-review\\queue.jsonl",
+    "high_risk_operations": ["delete", "move", "rename", "merge", "rewrite_raw"],
+    "protected_dirs": ["raw", "quicknote", "inbox"]
+  },
+  "routing": {
+    "default_entry": "organize_kb",
+    "user_entries": ["organize_kb", "discover_topics", "prepare_writing", "weave_work_memory", "healthcheck"],
+    "workflows_file": "workflows.json",
+    "router_file": "router.json",
+    "daily": ["organize_kb", "weave_work_memory"],
+    "weekly": ["healthcheck"],
+    "on_demand": ["discover_topics", "prepare_writing"]
+  },
+  "methodology": {
+    "principles": [
+      "原始资料不可破坏，派生知识必须可追溯",
+      "先 source/literature note，再 seed，再 topic/concept，再 material pack",
+      "主题页必须聚合多个来源，不能只做单篇摘要",
+      "每条判断都要区分事实、解释、观点和待验证假设",
+      "链接必须能解析，不能制造看似存在的 wikilink",
+      "低置信度、断链、来源不足、分类不确定的内容进入 manual_review"
+    ]
+  }
+}

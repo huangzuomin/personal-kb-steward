@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "writing-evidence-harvester output",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "type", "status", "stage", "sources", "facts", "cases", "confidence", "review_required"],
+        "properties": {
+          "title": {"type": "string"},
+          "type": {"const": "evidence-pack"},
+          "status": {"enum": ["compiled", "growing", "manual_review"]},
+          "stage": {"enum": ["compiled", "collecting", "insufficient"]},
+          "sources": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "facts": {"type": "array", "items": {"type": "object"}},
+          "cases": {"type": "array", "items": {"type": "object"}},
+          "data_points": {"type": "array", "items": {"type": "string"}},
+          "timeline": {"type": "array", "items": {"type": "string"}},
+          "counter_views": {"type": "array", "items": {"type": "string"}},
+          "gaps": {"type": "array", "items": {"type": "string"}},
+          "confidence": {"enum": ["high", "medium", "low"]},
+          "review_required": {"type": "boolean"},
+          "manual_review": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{% include 'base_frontmatter.j2' with context %}
+---
+title: "{{ title }}"
+type: source-note
+status: active
+stage: compiled
+sources:
+  - "{{ source_rel }}"
+tags:
+  - "source"
+confidence: high
+---
+# {{ title }}
+
+## 原始来源
+- [[{{ source_rel }}]]
+
+## 核心摘要
+{{ summary }}
+
+## 提取的专题
+{% for topic in topics %}
+- [[wiki/topics/topic-{{ topic.title|replace(' ', '-')|lower[:72] }}.md|{{ topic.title }}]]
+{% endfor %}

@@ -1,0 +1,28 @@
+# Personal Secrets & Config
+.env
+config.json
+
+# Local Runtime Data
+.openclaw/
+.consolidate-state.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Test / Output artifacts
+demo_report.html
+task-*.md
+.obsidian/

@@ -1,0 +1,34 @@
+{% include 'base_frontmatter.j2' with context %}
+---
+title: "{{ title }}"
+type: topic-page
+status: manual_review
+stage: compiling
+sources:
+  - "{{ source_rel }}"
+  - "{{ source_target }}"
+tags:
+  - "topic"
+confidence: low
+---
+# 专题：{{ title }}
+
+> **注意：** 这是一个由 `topic-research-compile` 自动生成的 Topic 雏形（Stub）。
+> 请核对边界是否合理，补充缺失的信息，并将状态改为 `growing`。
+
+## 主题边界与核心关注点
+{{ content }}
+
+## 双链索引
+
+- 来源笔记：[[{{ source_target }}]]
+- 原始资料：[[{{ source_rel }}]]
+
+## 来源地图
+（待补充）
+
+## 已知事实
+（待补充，可调用 writing-evidence-harvester 提取）
+
+## 核心概念
+（待补充）

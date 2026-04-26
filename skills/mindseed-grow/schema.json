@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mindseed-grow output",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "type", "status", "stage", "sources", "summary", "signals", "growth_directions", "confidence", "review_required"],
+        "properties": {
+          "title": {"type": "string"},
+          "type": {"const": "seed-card"},
+          "status": {"enum": ["seed", "manual_review"]},
+          "stage": {"enum": ["seed", "needs_context"]},
+          "sources": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "summary": {"type": "string"},
+          "signals": {"type": "array", "items": {"type": "string"}},
+          "growth_directions": {"type": "array", "items": {"type": "string"}},
+          "related": {"type": "array", "items": {"type": "string"}},
+          "pending_links": {"type": "array", "items": {"type": "string"}},
+          "confidence": {"enum": ["high", "medium", "low"]},
+          "review_required": {"type": "boolean"},
+          "manual_review": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}
