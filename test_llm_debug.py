@@ -1,6 +1,7 @@
 """Debug LLM input selection."""
 import sys
-sys.path.insert(0, r"C:\Users\zooma\.qclaw\workspace-agent-f731ab99")
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.config import config
 from core.vault import build_index
 from scripts.personal_kb_steward import (

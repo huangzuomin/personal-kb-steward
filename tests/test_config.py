@@ -23,7 +23,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_agent_home_path_expansion(self):
         cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
-        self.assertNotIn("C:\\Users\\zooma", cfg["knowledge_base"])
+        self.assertNotIn("C:\\Users", cfg["knowledge_base"])
         resolved = steward.resolve_path("${AGENT_HOME}\\kb-template")
         self.assertEqual(resolved, (ROOT / "kb-template").resolve())
 

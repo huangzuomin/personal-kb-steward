@@ -1,6 +1,7 @@
 """Quick LLM call test."""
 import sys, json
-sys.path.insert(0, r"C:\Users\zooma\.qclaw\workspace-agent-f731ab99")
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.llm import call_chat_completion, LLMError
 from core.config import config
 

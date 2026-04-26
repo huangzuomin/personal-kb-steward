@@ -3,7 +3,7 @@
 ## 知识库路径
 
 ```text
-C:\Users\zooma\.qclaw\workspace\wiki
+C:\path\to\your\workspace\wiki
 ```
 
 ## 重要目录
