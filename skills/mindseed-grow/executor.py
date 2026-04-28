@@ -7,6 +7,13 @@ from core.clustering import ClusterInput, cluster_inputs
 from renderer import render
 
 
+def safe_filename(title: str) -> str:
+    """把标题转成安全的文件系统文件名，保留中文和可见字符。"""
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', ' ', title).strip()
+    cleaned = re.sub(r'[-\s]+', '-', cleaned).strip('-')
+    return cleaned[:200] or "seed"
+
+
 def slug(text: str) -> str:
     ascii_part = re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()
     if ascii_part:
@@ -58,7 +65,7 @@ def execute(context: dict) -> dict:
         }
         pages.append({
             "rel_dir_key": "seed_dir",
-            "filename": f"seed-{cluster['slug']}.md",
+            "filename": f"{safe_filename(cluster['title'])}.md",
             "content": render(item),
             "sources": item["sources"],
             "item": item,

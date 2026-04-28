@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from core.markdown import bullet, frontmatter
+from core.safety import safe_write_text
 from core.vault import VaultIndex
 
 
@@ -16,6 +17,7 @@ def write_run_log(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[
     yyyy = now.strftime("%Y")
     yyyy_mm = now.strftime("%Y-%m")
     ts = now.strftime("%Y-%m-%d-%H%M")
+    run_id = str(cfg.get("_run_id") or now.strftime("log-%Y%m%d-%H%M%S"))
     
     logs_dir = index.root / "logs" / yyyy
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -53,7 +55,14 @@ def write_run_log(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[
             ""
         ]
         
-        run_log_path.write_text("\n".join(lines), encoding="utf-8")
+        safe_write_text(
+            cfg,
+            run_log_path,
+            "\n".join(lines),
+            run_id=run_id,
+            operation="write_run_log",
+            reason="Write per-skill operation log with backup if the target already exists.",
+        )
         run_log_paths.append(rel_run_log)
         
     if not run_log_paths:
@@ -65,7 +74,14 @@ def write_run_log(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[
     rel_monthly_log = f"logs/{yyyy}/{monthly_log_name}"
     
     if not monthly_log_path.exists():
-        monthly_log_path.write_text(f"# {yyyy_mm} 知识库运行日志\n\n## Summary\n\n运行次数：0\n新建页面：0\n错误次数：0\n\n## Runs\n\n", encoding="utf-8")
+        safe_write_text(
+            cfg,
+            monthly_log_path,
+            f"# {yyyy_mm} 知识库运行日志\n\n## Summary\n\n运行次数：0\n新建页面：0\n错误次数：0\n\n## Runs\n\n",
+            run_id=run_id,
+            operation="create_monthly_log",
+            reason="Create monthly operation log.",
+        )
         
     monthly_content = monthly_log_path.read_text(encoding="utf-8")
     
@@ -88,12 +104,26 @@ def write_run_log(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[
     run_links = "\n".join(f"- [[{p.replace('.md', '')}]]" for p in run_log_paths)
     monthly_content += f"{run_links}\n"
     
-    monthly_log_path.write_text(monthly_content, encoding="utf-8")
+    safe_write_text(
+        cfg,
+        monthly_log_path,
+        monthly_content,
+        run_id=run_id,
+        operation="update_monthly_log",
+        reason="Update monthly operation log; existing file is backed up first.",
+    )
     
     # 3. Update root log.md
     root_log_path = index.root / "log.md"
     if not root_log_path.exists():
-        root_log_path.write_text("# Knowledge Base Log\n\n## Recent Runs\n\n## Monthly Archives\n\n", encoding="utf-8")
+        safe_write_text(
+            cfg,
+            root_log_path,
+            "# Knowledge Base Log\n\n## Recent Runs\n\n## Monthly Archives\n\n",
+            run_id=run_id,
+            operation="create_root_log",
+            reason="Create root operation log.",
+        )
         
     root_log_content = root_log_path.read_text(encoding="utf-8")
     
@@ -130,6 +160,13 @@ def write_run_log(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[
     archives_text = "\n".join(sorted(set(existing_archives), reverse=True))
     
     new_root_content = f"# Knowledge Base Log\n\n## Recent Runs\n\n{runs_text}\n\n## Monthly Archives\n\n{archives_text}\n"
-    root_log_path.write_text(new_root_content, encoding="utf-8")
+    safe_write_text(
+        cfg,
+        root_log_path,
+        new_root_content,
+        run_id=run_id,
+        operation="update_root_log",
+        reason="Update root operation log; existing file is backed up first.",
+    )
     
     return run_log_paths

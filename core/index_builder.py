@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.safety import safe_write_text
 from core.vault import VaultIndex
 
 
 def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
     """Updates the root index.md and core directory README.md files."""
     root = index.root
+    run_id = str(cfg.get("_run_id") or datetime.now(timezone.utc).strftime("index-%Y%m%d-%H%M%S"))
     
     # 1. Ensure core directories have a README.md
     core_dirs = ["seeds", "topics", "concepts", "projects", "cases", "material-packs"]
@@ -19,7 +22,14 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
             continue
         readme_path = dir_path / "README.md"
         if not readme_path.exists():
-            readme_path.write_text(f"# {d.title()} Index\n\n- Automatically managed by Knowledge Steward.\n", encoding="utf-8")
+            safe_write_text(
+                cfg,
+                readme_path,
+                f"# {d.title()} Index\n\n- Automatically managed by Knowledge Steward.\n",
+                run_id=run_id,
+                operation="create_index_readme",
+                reason="Create missing managed directory README before updating the knowledge-base index.",
+            )
 
     # 2. Build root index.md content
     
@@ -107,4 +117,11 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
 """
     
     index_path = root / "index.md"
-    index_path.write_text(index_content, encoding="utf-8")
+    safe_write_text(
+        cfg,
+        index_path,
+        index_content,
+        run_id=run_id,
+        operation="write_root_index",
+        reason="Update generated knowledge-base index; existing file is backed up first.",
+    )

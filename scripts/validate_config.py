@@ -65,7 +65,14 @@ def main() -> int:
     if not kb.exists():
         errors.append(f"knowledge_base 不存在：{kb}")
     state = resolve_path(path_expr(cfg, "state_file"), kb_home=str(kb))
-    for key in ["safety.plans_dir", "safety.runs_dir", "safety.processed_index", "safety.manual_review_queue"]:
+    for key in [
+        "safety.plans_dir",
+        "safety.runs_dir",
+        "safety.processed_index",
+        "safety.manual_review_queue",
+        "safety.backup_dir",
+        "safety.operation_log",
+    ]:
         expr = path_expr(cfg, key)
         if not expr:
             errors.append(f"{key} 缺失")

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from .config import processed_index_path, read_json, state_path, write_json
+from .config import processed_index_path, read_json, state_path
+from .safety import safe_write_text
 from .vault import Note, VaultIndex
 
 
@@ -27,7 +29,14 @@ def save_state(cfg: dict[str, Any], index: VaultIndex, operations: list[dict[str
     state.setdefault("history", [])
     state["history"].append({"time": timestamp, "operations": operations})
     state["history"] = state["history"][-30:]
-    write_json(state_path(cfg), state)
+    safe_write_text(
+        cfg,
+        state_path(cfg),
+        json.dumps(state, ensure_ascii=False, indent=2),
+        run_id=str(cfg.get("_run_id") or timestamp),
+        operation="write_state",
+        reason="Persist runtime state; previous state is backed up first.",
+    )
 
 
 def changed_notes(index: VaultIndex, state: dict[str, Any]) -> list[Note]:
@@ -44,7 +53,14 @@ def load_processed_index(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 def save_processed_index(data: dict[str, Any], cfg: dict[str, Any], timestamp: str) -> None:
     data["version"] = 1
     data["updated_at"] = timestamp
-    write_json(processed_index_path(cfg), data)
+    safe_write_text(
+        cfg,
+        processed_index_path(cfg),
+        json.dumps(data, ensure_ascii=False, indent=2),
+        run_id=str(cfg.get("_run_id") or timestamp),
+        operation="write_processed_index",
+        reason="Persist processed index; previous index is backed up first.",
+    )
 
 
 def processed_record(data: dict[str, Any], note: Note, skill: str) -> dict[str, Any] | None:

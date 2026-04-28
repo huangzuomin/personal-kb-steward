@@ -20,6 +20,8 @@ class ApplyPlanTests(unittest.TestCase):
         cfg["safety"]["runs_dir"] = str(kb / ".openclaw" / "runs")
         cfg["safety"]["processed_index"] = str(kb / ".openclaw" / "processed-index.json")
         cfg["safety"]["manual_review_queue"] = str(kb / ".openclaw" / "manual-review" / "queue.jsonl")
+        cfg["safety"]["backup_dir"] = str(kb / ".openclaw" / "backups")
+        cfg["safety"]["operation_log"] = str(kb / ".openclaw" / "operation-log.jsonl")
         return cfg
 
     def test_apply_plan_and_rollback_on_temp_vault(self):
@@ -40,9 +42,42 @@ class ApplyPlanTests(unittest.TestCase):
             self.assertEqual(steward.command_apply_plan(cfg, str(plan_path)), 0)
             created = [kb / page["rel_path"] for page in plan["planned_pages"]]
             self.assertTrue(all(path.exists() for path in created))
+            self.assertTrue((kb / ".openclaw" / "operation-log.jsonl").exists())
+            self.assertTrue((kb / ".openclaw" / "backups" / plan["run_id"]).exists())
 
             self.assertEqual(steward.command_rollback(cfg, plan["run_id"]), 0)
             self.assertTrue(all(not path.exists() for path in created))
+            self.assertTrue((kb / ".openclaw" / "backups" / f"rollback-{plan['run_id']}").exists())
+
+    def test_apply_plan_failure_reports_recovery_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp)
+            (kb / "quicknote").mkdir()
+            (kb / "inbox").mkdir()
+            (kb / "raw").mkdir()
+            cfg = self.make_cfg(kb)
+            bad_plan = {
+                "run_id": "bad-plan",
+                "task": "bad input",
+                "primary_skill": "mindseed-grow",
+                "planned_pages": [{
+                    "skill": "mindseed-grow",
+                    "operation": "create",
+                    "rel_path": "raw/blocked.md",
+                    "sources": [],
+                    "content": "blocked",
+                    "content_sha256": steward.sha256_text("blocked"),
+                }],
+            }
+            plan_path = kb / ".openclaw" / "plans" / "bad-plan.json"
+            steward.write_json(plan_path, bad_plan)
+
+            with self.assertRaises(SystemExit):
+                steward.command_apply_plan(cfg, str(plan_path))
+
+            manifest = kb / ".openclaw" / "runs" / "bad-plan.json"
+            self.assertTrue(manifest.exists())
+            self.assertTrue((kb / ".openclaw" / "operation-log.jsonl").exists())
 
 
 if __name__ == "__main__":

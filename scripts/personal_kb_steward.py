@@ -43,6 +43,14 @@ from core.skill_runtime import run_skill_runtime
 from core.log_manager import write_run_log
 from core.index_builder import update_index
 from core.skill_executor import execute_skill
+from core.safety import (
+    append_operation_log,
+    backup_root,
+    operation_log_path,
+    recovery_hint,
+    safe_delete_file,
+    safe_write_text,
+)
 from core.config import (
     config,
     kb_root,
@@ -247,7 +255,7 @@ def apply_executor_pages(index: VaultIndex, cfg: dict[str, Any], result: dict[st
     inputs = list(result.get("inputs", []))
     for page in result.get("pages", []):
         rel_dir = cfg["write"][page["rel_dir_key"]]
-        rel = write_page(index, rel_dir, f"{Path(page['filename']).stem}-{run_id()}.md", page["content"])
+        rel = write_page(index, cfg, rel_dir, f"{Path(page['filename']).stem}-{run_id()}.md", page["content"])
         created.append(rel)
         issues.extend(validate_markdown(index, page["content"], page.get("sources", [])))
     return {
@@ -350,10 +358,16 @@ def unique_path(path: Path) -> Path:
     raise RuntimeError(f"无法生成唯一文件名：{path}")
 
 
-def write_page(index: VaultIndex, rel_dir: str, filename: str, content: str) -> str:
+def write_page(index: VaultIndex, cfg: dict[str, Any], rel_dir: str, filename: str, content: str) -> str:
     path = unique_path(index.root / rel_dir / filename)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    safe_write_text(
+        cfg,
+        path,
+        content,
+        run_id=str(cfg.get("_run_id") or run_id()),
+        operation="create_page",
+        reason="Create derived knowledge page; original source files are not modified.",
+    )
     return path.relative_to(index.root).as_posix()
 
 
@@ -436,7 +450,7 @@ def seed_card_for_cluster(index: VaultIndex, cfg: dict[str, Any], cluster: dict[
         + "## 人工复核项\n\n"
         + ("- 暂无明显复核项。\n" if not issues else "".join(f"- {item}\n" for item in issues))
     )
-    created = write_page(index, cfg["write"]["seed_dir"], f"seed-{cluster['slug']}-{run_id()}.md", content)
+    created = write_page(index, cfg, cfg["write"]["seed_dir"], f"seed-{cluster['slug']}-{run_id()}.md", content)
     return {"skill": "mindseed-grow", "created": [created], "processed": len(notes), "inputs": sources, "issues": issues}
 
 
@@ -553,7 +567,7 @@ def skill_work_memory_weave(index: VaultIndex, cfg: dict[str, Any], changed: lis
             + "\n## 人工复核项\n\n"
             + bullet(note_issues, "暂无明确复核项。")
         )
-        created.append(write_page(index, cfg["write"]["work_memory_dir"], f"work-memory-{slug(note.title)}-{run_id()}.md", content))
+        created.append(write_page(index, cfg, cfg["write"]["work_memory_dir"], f"work-memory-{slug(note.title)}-{run_id()}.md", content))
     issues.extend(f"输入未变化，跳过：{item}" for item in already_processed[:20])
     return {"skill": "work-memory-weave", "created": created, "processed": len(candidates), "inputs": inputs, "issues": issues}
 
@@ -724,7 +738,7 @@ def skill_evidence_harvester(index: VaultIndex, cfg: dict[str, Any], query: str)
     )
     issues = validate_markdown(index, content, sources)
     issues.append("executor 未找到，使用 heuristic fallback 生成 evidence-pack。")
-    created = write_page(index, cfg["write"]["evidence_dir"], f"evidence-{slug(query, 'topic')}-{run_id()}.md", content)
+    created = write_page(index, cfg, cfg["write"]["evidence_dir"], f"evidence-{slug(query, 'topic')}-{run_id()}.md", content)
     return {"skill": "writing-evidence-harvester", "created": [created], "processed": len(items), "issues": issues, "sources": sources, "items": items}
 
 
@@ -787,7 +801,7 @@ def skill_gap_finder(index: VaultIndex, cfg: dict[str, Any], query: str) -> dict
         + "\n## 推荐补充路径\n\n"
         + "- 查找一手来源。\n- 补充反方材料。\n- 为关键事实寻找可引用段落。\n"
     )
-    created = write_page(index, cfg["write"]["gaps_dir"], f"gap-{slug(query, 'topic')}-{run_id()}.md", content)
+    created = write_page(index, cfg, cfg["write"]["gaps_dir"], f"gap-{slug(query, 'topic')}-{run_id()}.md", content)
     return {"skill": "knowledge-gap-finder", "created": [created], "processed": len(gaps), "issues": ["executor 未找到，使用 heuristic fallback。"]}
 
 
@@ -808,7 +822,7 @@ def skill_claim_checker(index: VaultIndex, cfg: dict[str, Any], query: str) -> d
         content += f"## {claim}\n\n- 证据等级：{level}\n- 支持来源：\n"
         content += bullet([safe_wikilink(index, src) for src in support], "暂无来源支持，不能写成结论。")
         content += "\n"
-    created = write_page(index, cfg["write"]["claims_dir"], f"claim-check-{slug(query, 'claim')}-{run_id()}.md", content)
+    created = write_page(index, cfg, cfg["write"]["claims_dir"], f"claim-check-{slug(query, 'claim')}-{run_id()}.md", content)
     return {"skill": "claim-evidence-checker", "created": [created], "processed": len(rows), "issues": []}
 
 
@@ -827,7 +841,7 @@ def skill_case_bank(index: VaultIndex, cfg: dict[str, Any], query: str) -> dict[
         + "## 风险与限制\n\n"
         + "- 案例上下文需回到原文确认。\n"
     )
-    created = write_page(index, cfg["write"]["cases_dir"], f"case-story-{slug(query, 'case')}-{run_id()}.md", content)
+    created = write_page(index, cfg, cfg["write"]["cases_dir"], f"case-story-{slug(query, 'case')}-{run_id()}.md", content)
     return {"skill": "case-story-bank-builder", "created": [created], "processed": len(items), "issues": []}
 
 
@@ -847,7 +861,7 @@ def skill_project_review(index: VaultIndex, cfg: dict[str, Any], query: str) -> 
         + "## 下次检查清单\n\n"
         + "- 目标是否明确。\n- 关键决策是否记录。\n- 行动项是否闭环。\n"
     )
-    created = write_page(index, cfg["write"]["reviews_dir"], f"project-review-{slug(query, 'project')}-{run_id()}.md", content)
+    created = write_page(index, cfg, cfg["write"]["reviews_dir"], f"project-review-{slug(query, 'project')}-{run_id()}.md", content)
     return {"skill": "project-review-synthesizer", "created": [created], "processed": len(notes), "issues": []}
 
 
@@ -888,7 +902,7 @@ def skill_topic_compile(index: VaultIndex, cfg: dict[str, Any], query: str) -> d
         + "## 下一步\n\n"
         + "- 生成 evidence pack。\n- 识别知识缺口。\n"
     )
-    created = write_page(index, cfg["write"]["topics_dir"], f"topic-{slug(query, 'topic')}-{run_id()}.md", content)
+    created = write_page(index, cfg, cfg["write"]["topics_dir"], f"topic-{slug(query, 'topic')}-{run_id()}.md", content)
     return {"skill": "topic-research-compile", "created": [created], "processed": len(notes), "issues": validate_markdown(index, content, sources)}
 
 
@@ -1186,7 +1200,7 @@ def write_report(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[s
             + f"- P2：{len(buckets.get('P2', []))}\n"
             + f"- P3：{len(buckets.get('P3', []))}\n"
         )
-    rel = write_page(index, cfg["write"]["reports_dir"], f"kb-steward-{run_id()}.md", content)
+    rel = write_page(index, cfg, cfg["write"]["reports_dir"], f"kb-steward-{run_id()}.md", content)
     return rel
 
 
@@ -1206,6 +1220,8 @@ def command_status(cfg: dict[str, Any]) -> int:
 
 def command_lint(cfg: dict[str, Any], write: bool = False) -> int:
     ensure_dirs(cfg)
+    if write:
+        cfg["_run_id"] = run_id()
     index = build_index(cfg)
     lint = healthcheck(index, cfg)
     print(json.dumps(lint, ensure_ascii=False, indent=2))
@@ -1227,6 +1243,7 @@ def command_run(cfg: dict[str, Any], apply: bool = False, use_llm: bool = True) 
         print_plan_summary(plan, path, queued)
         return 0
     ensure_dirs(cfg)
+    cfg["_run_id"] = run_id()
     index = build_index(cfg)
     state = load_state(cfg)
     changed = changed_notes(index, state)
@@ -1318,6 +1335,7 @@ def command_run(cfg: dict[str, Any], apply: bool = False, use_llm: bool = True) 
 
 def execute_task_apply(cfg: dict[str, Any], task: str) -> int:
     ensure_dirs(cfg)
+    cfg["_run_id"] = run_id()
     index = build_index(cfg)
     state = load_state(cfg)
     changed = changed_notes(index, state)
@@ -1414,7 +1432,14 @@ def assert_safe_rel_write(cfg: dict[str, Any], rel_path: str) -> None:
 
 def write_run_manifest(cfg: dict[str, Any], manifest: dict[str, Any]) -> Path:
     target = runs_dir(cfg) / f"{manifest['run_id']}.json"
-    write_json(target, manifest)
+    safe_write_text(
+        cfg,
+        target,
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        run_id=str(cfg.get("_run_id") or manifest["run_id"]),
+        operation="write_run_manifest",
+        reason="Persist run manifest with backup if an earlier manifest exists.",
+    )
     return target
 
 
@@ -1426,52 +1451,104 @@ def command_apply_plan(cfg: dict[str, Any], ref: str) -> int:
         raise SystemExit("该 plan 没有 planned_pages，不能 apply-plan。")
     ensure_dirs(cfg)
     root = kb_root(cfg)
+    apply_run_id = str(plan.get("run_id") or run_id())
+    cfg["_run_id"] = apply_run_id
     created: list[dict[str, Any]] = []
-    for page in pages:
-        rel_path = page["rel_path"]
-        assert_safe_rel_write(cfg, rel_path)
-        target = (root / rel_path).resolve()
-        if not str(target).startswith(str(root)):
-            raise SystemExit(f"拒绝越界写入：{target}")
-        if target.exists():
-            raise SystemExit(f"目标已存在，拒绝覆盖：{rel_path}")
-        if sha256_text(page["content"]) != page["content_sha256"]:
-            raise SystemExit(f"plan 内容 hash 不匹配：{rel_path}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(page["content"], encoding="utf-8")
-        created.append({
-            "rel_path": rel_path,
-            "sha256": sha256_file(target),
-            "skill": page.get("skill"),
-            "sources": page.get("sources", []),
+    try:
+        append_operation_log(cfg, {
+            "operation": "apply_plan_start",
+            "run_id": apply_run_id,
+            "plan_path": str(plan_path),
+            "knowledge_base": str(root),
+            "planned_pages": len(pages),
+            "backup_dir": str(backup_root(cfg) / apply_run_id),
         })
+        for page in pages:
+            rel_path = page["rel_path"]
+            assert_safe_rel_write(cfg, rel_path)
+            target = (root / rel_path).resolve()
+            if not str(target).startswith(str(root)):
+                raise SystemExit(f"拒绝越界写入：{target}")
+            if target.exists():
+                raise SystemExit(f"目标已存在，拒绝覆盖：{rel_path}")
+            if sha256_text(page["content"]) != page["content_sha256"]:
+                raise SystemExit(f"plan 内容 hash 不匹配：{rel_path}")
+            safe_write_text(
+                cfg,
+                target,
+                page["content"],
+                run_id=apply_run_id,
+                operation="apply_plan_create_page",
+                reason="Apply reviewed plan page; original raw/quicknote/inbox files are protected.",
+            )
+            created.append({
+                "rel_path": rel_path,
+                "sha256": sha256_file(target),
+                "skill": page.get("skill"),
+                "sources": page.get("sources", []),
+            })
 
-    index = build_index(cfg)
-    op = {
-        "skill": plan.get("primary_skill"),
-        "created": [item["rel_path"] for item in created],
-        "processed": len({src for item in created for src in item.get("sources", [])}),
-        "inputs": sorted({src for item in created for src in item.get("sources", [])}),
-        "issues": [],
-    }
-    write_run_log(index, cfg, [op], plan.get("task", "apply-plan"))
-    update_processed_index(index, cfg, [op])
-    save_state(cfg, build_index(cfg), [op])
-    update_index(build_index(cfg), cfg)
-    manifest = {
-        "run_id": plan.get("run_id"),
-        "applied_at": stamp(),
-        "plan_path": str(plan_path),
-        "knowledge_base": str(root),
-        "created": created,
-        "status": "applied",
-    }
-    manifest_path = write_run_manifest(cfg, manifest)
-    print(f"已应用 plan：{plan_path}")
-    print(f"新建页面：{len(created)}")
-    print(f"run manifest：{manifest_path}")
-    print(f"回滚命令：python scripts\\personal_kb_steward.py rollback {plan.get('run_id')}")
-    return 0
+        index = build_index(cfg)
+        op = {
+            "skill": plan.get("primary_skill"),
+            "created": [item["rel_path"] for item in created],
+            "processed": len({src for item in created for src in item.get("sources", [])}),
+            "inputs": sorted({src for item in created for src in item.get("sources", [])}),
+            "issues": [],
+        }
+        write_run_log(index, cfg, [op], plan.get("task", "apply-plan"))
+        update_processed_index(index, cfg, [op])
+        save_state(cfg, build_index(cfg), [op])
+        update_index(build_index(cfg), cfg)
+        manifest = {
+            "run_id": apply_run_id,
+            "applied_at": stamp(),
+            "plan_path": str(plan_path),
+            "knowledge_base": str(root),
+            "created": created,
+            "backup_dir": str(backup_root(cfg) / apply_run_id),
+            "operation_log": str(operation_log_path(cfg)),
+            "recovery_hint": recovery_hint(cfg, apply_run_id),
+            "status": "applied",
+        }
+        manifest_path = write_run_manifest(cfg, manifest)
+        append_operation_log(cfg, {
+            "operation": "apply_plan_complete",
+            "run_id": apply_run_id,
+            "created": [item["rel_path"] for item in created],
+            "manifest_path": str(manifest_path),
+        })
+        print(f"已应用 plan：{plan_path}")
+        print(f"新建页面：{len(created)}")
+        print(f"run manifest：{manifest_path}")
+        print(f"备份目录：{backup_root(cfg) / apply_run_id}")
+        print(f"操作日志：{operation_log_path(cfg)}")
+        print(f"回滚命令：python scripts\\personal_kb_steward.py rollback {apply_run_id}")
+        return 0
+    except (Exception, SystemExit) as exc:
+        failed_manifest = {
+            "run_id": apply_run_id,
+            "failed_at": stamp(),
+            "plan_path": str(plan_path),
+            "knowledge_base": str(root),
+            "created": created,
+            "backup_dir": str(backup_root(cfg) / apply_run_id),
+            "operation_log": str(operation_log_path(cfg)),
+            "recovery_hint": recovery_hint(cfg, apply_run_id),
+            "status": "failed",
+            "error": str(exc),
+        }
+        manifest_path = write_run_manifest(cfg, failed_manifest)
+        append_operation_log(cfg, {
+            "operation": "apply_plan_failed",
+            "run_id": apply_run_id,
+            "error": str(exc),
+            "manifest_path": str(manifest_path),
+        })
+        print(f"apply-plan 失败：{exc}", file=sys.stderr)
+        print(recovery_hint(cfg, apply_run_id), file=sys.stderr)
+        print(f"失败 run manifest：{manifest_path}", file=sys.stderr)
+        raise
 
 
 def resolve_run_manifest(cfg: dict[str, Any], ref: str) -> Path:
@@ -1493,8 +1570,16 @@ def command_rollback(cfg: dict[str, Any], ref: str) -> int:
     manifest_path = resolve_run_manifest(cfg, ref)
     manifest = read_json(manifest_path, {})
     root = kb_root(cfg)
+    rollback_run_id = f"rollback-{manifest.get('run_id') or run_id()}"
+    cfg["_run_id"] = rollback_run_id
     removed = []
     skipped = []
+    append_operation_log(cfg, {
+        "operation": "rollback_start",
+        "run_id": rollback_run_id,
+        "target_run_id": manifest.get("run_id"),
+        "manifest_path": str(manifest_path),
+    })
     for item in manifest.get("created", []):
         rel_path = item["rel_path"]
         assert_safe_rel_write(cfg, rel_path)
@@ -1505,15 +1590,32 @@ def command_rollback(cfg: dict[str, Any], ref: str) -> int:
         if sha256_file(target) != item.get("sha256"):
             skipped.append(f"hash 已变化，跳过：{rel_path}")
             continue
-        target.unlink()
+        safe_delete_file(
+            cfg,
+            target,
+            run_id=rollback_run_id,
+            operation="rollback_delete_created_page",
+            reason="Rollback deletes a generated page only after backing it up.",
+        )
         removed.append(rel_path)
     manifest["status"] = "rolled_back"
     manifest["rolled_back_at"] = stamp()
     manifest["removed"] = removed
     manifest["skipped"] = skipped
+    manifest["rollback_backup_dir"] = str(backup_root(cfg) / rollback_run_id)
+    manifest["operation_log"] = str(operation_log_path(cfg))
     write_json(manifest_path, manifest)
+    append_operation_log(cfg, {
+        "operation": "rollback_complete",
+        "run_id": rollback_run_id,
+        "target_run_id": manifest.get("run_id"),
+        "removed": removed,
+        "skipped": skipped,
+    })
     print(f"已回滚 run：{manifest.get('run_id')}")
     print(f"删除页面：{len(removed)}")
+    print(f"删除前备份目录：{backup_root(cfg) / rollback_run_id}")
+    print(f"操作日志：{operation_log_path(cfg)}")
     if skipped:
         print("跳过：")
         for item in skipped:

@@ -67,6 +67,8 @@
     "runs_dir": "${AGENT_HOME}\\.openclaw\\runs",
     "processed_index": "${AGENT_HOME}\\.openclaw\\processed-index.json",
     "manual_review_queue": "${AGENT_HOME}\\.openclaw\\manual-review\\queue.jsonl",
+    "backup_dir": "${AGENT_HOME}\\.openclaw\\backups",
+    "operation_log": "${AGENT_HOME}\\.openclaw\\operation-log.jsonl",
     "high_risk_operations": ["delete", "move", "rename", "merge", "rewrite_raw"],
     "protected_dirs": ["raw", "quicknote", "inbox"]
   },
