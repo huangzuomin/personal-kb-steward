@@ -54,11 +54,14 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         value = value.strip()
         if value == "":
             meta[current_key] = []
-        elif value.startswith("[") and value.endswith("]"):
+        elif (value.startswith("[") and value.endswith("]")) or (value.startswith("{") and value.endswith("}")):
             try:
                 meta[current_key] = json.loads(value)
             except json.JSONDecodeError:
-                meta[current_key] = [item.strip().strip('"') for item in value[1:-1].split(",") if item.strip()]
+                if value.startswith("["):
+                    meta[current_key] = [item.strip().strip('"') for item in value[1:-1].split(",") if item.strip()]
+                else:
+                    meta[current_key] = value
         else:
             meta[current_key] = value.strip('"')
     return meta, match.group(2)

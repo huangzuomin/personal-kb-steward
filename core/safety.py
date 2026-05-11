@@ -121,3 +121,34 @@ def recovery_hint(cfg: dict[str, Any], run_id: str) -> str:
         f"操作日志 {operation_log_path(cfg)}；"
         f"可尝试回滚命令 python scripts\\personal_kb_steward.py rollback {run_id}"
     )
+
+
+def user_next_step(error: BaseException | str) -> str:
+    text = str(error)
+    manual_review_markers = (
+        "人工审核",
+        "需要人工",
+        "manual review",
+        "manual_review",
+        "review_required",
+        "low-confidence",
+        "low confidence",
+        "confidence",
+        "浜哄伐瀹℃牳",
+        "瀹℃牳",
+        "闇€瑕佷汉宸",
+        "宸ュ鏍",
+    )
+    if isinstance(error, PermissionError) or "Permission denied" in text or "Access is denied" in text:
+        return "请检查目标目录权限，关闭占用该目录的程序，或改用有写入权限的知识库路径后重试。"
+    if isinstance(error, FileNotFoundError) or "找不到" in text or "No such file" in text:
+        return "请确认 plan 引用和 knowledge_base 路径存在，再重新运行 dry-run plan。"
+    if isinstance(error, json.JSONDecodeError) or "JSON" in text or "Expecting" in text:
+        return "请重新生成 plan 文件；当前 plan 内容不是有效 JSON，不能安全应用。"
+    if any(marker in text for marker in manual_review_markers):
+        return "请先处理 manual review queue，确认内容后重新生成不需要人工审核的 plan，再执行 apply-plan。"
+    if "hash" in text:
+        return "请重新生成 plan；当前 plan 内容与记录的 hash 不一致。"
+    if "受保护目录" in text or "不安全目标路径" in text or "越界" in text:
+        return "请修改 plan 目标路径，只允许写入派生目录，不能写入 raw/quicknote/inbox 或知识库外部。"
+    return "请查看 failed run manifest 和 operation-log，确认问题后重新生成 plan 或执行 rollback。"

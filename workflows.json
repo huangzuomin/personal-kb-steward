@@ -4,29 +4,42 @@
   "entries": {
     "organize_kb": {
       "label": "整理知识库",
-      "description": "把 quicknote/inbox 中的碎片整理为可追溯 seed，并输出健康提示。",
+      "description": "把 quicknote/inbox 中的碎片整理为可追溯 seed；raw 长文由专门链路处理。",
       "aliases": ["整理知识库", "整理碎片", "清理 inbox", "整理 quicknote", "生长 seed"],
       "primary_skill": "mindseed-grow",
-      "pipeline": ["mindseed-grow", "kb-lint-healthcheck"],
-      "writes_by_default": ["wiki/seeds", "outputs", "log.md"],
+      "pipeline": ["mindseed-grow"],
+      "follow_up_skills": ["kb-lint-healthcheck"],
+      "writes_by_default": ["wiki/seeds"],
       "risk_policy": "raw 默认不进入 mindseed-grow；重复、断链、低置信度进入人工确认。"
+    },
+    "init_kb": {
+      "label": "初始化知识库",
+      "description": "按批 intake 原始资料，先沉淀 source note，再生成 seed 与 topic/concept/case/material-pack 候选，并执行质量门禁。",
+      "aliases": ["初始化知识库", "初始化", "全量整理", "初始化整理", "init-kb"],
+      "primary_skill": "kb-initialize",
+      "pipeline": ["intake", "source_compile", "seed_cluster", "promote_candidates", "quality_gate"],
+      "follow_up_skills": ["kb-lint-healthcheck"],
+      "writes_by_default": ["wiki/sources", "wiki/seeds", "wiki/topics", "wiki/concepts", "wiki/cases", "wiki/material-packs"],
+      "risk_policy": "初始化必须分批执行；候选页和低置信度内容进入人工确认；PDF 进入待抽取队列。"
     },
     "discover_topics": {
       "label": "发现选题",
       "description": "从 seed/topic/source/work-memory 网络中发现值得写的候选选题。",
       "aliases": ["发现选题", "有什么值得写", "找选题", "挖掘选题", "发现主题"],
       "primary_skill": "topic-insight-miner",
-      "pipeline": ["topic-insight-miner", "knowledge-gap-finder"],
-      "writes_by_default": ["wiki/topics", "wiki/gaps", "outputs", "log.md"],
-      "risk_policy": "只生成 topic-card 或 gap-report，不直接生成正式 topic-page。"
+      "pipeline": ["topic-insight-miner"],
+      "follow_up_skills": ["knowledge-gap-finder"],
+      "writes_by_default": ["wiki/topics"],
+      "risk_policy": "当前只自动生成 topic-card；gap-report 作为后续技能，不在本入口自动执行。"
     },
     "prepare_writing": {
       "label": "准备写作素材",
-      "description": "围绕具体选题准备 evidence pack、gap report 和 material pack。",
+      "description": "围绕具体选题生成 material pack；证据包和缺口报告作为后续技能单独执行。",
       "aliases": ["准备写作素材", "生成材料包", "找素材", "准备写作", "组稿"],
       "primary_skill": "writing-material-pack",
-      "pipeline": ["writing-evidence-harvester", "knowledge-gap-finder", "writing-material-pack"],
-      "writes_by_default": ["wiki/evidence", "wiki/gaps", "wiki/material-packs", "outputs", "log.md"],
+      "pipeline": ["writing-material-pack"],
+      "follow_up_skills": ["writing-evidence-harvester", "knowledge-gap-finder"],
+      "writes_by_default": ["wiki/material-packs"],
       "risk_policy": "不写正式文章；证据不足、反方缺失、claim 未校验时标记 manual_review。"
     },
     "weave_work_memory": {
@@ -34,8 +47,9 @@
       "description": "把会议、项目、周报、复盘整理为可追踪的工作记忆。",
       "aliases": ["沉淀工作记忆", "整理会议", "整理项目", "项目复盘", "整理周报"],
       "primary_skill": "work-memory-weave",
-      "pipeline": ["work-memory-weave", "project-review-synthesizer"],
-      "writes_by_default": ["wiki/work-memory", "wiki/project-reviews", "outputs", "log.md"],
+      "pipeline": ["work-memory-weave"],
+      "follow_up_skills": ["project-review-synthesizer"],
+      "writes_by_default": ["wiki/work-memory"],
       "risk_policy": "不虚构决策和行动项；done/validated/actionable 等高确定状态需要人工确认。"
     },
     "healthcheck": {
@@ -44,6 +58,7 @@
       "aliases": ["检查知识库健康", "知识库体检", "查断链", "检查质量", "健康检查"],
       "primary_skill": "kb-lint-healthcheck",
       "pipeline": ["kb-lint-healthcheck"],
+      "follow_up_skills": [],
       "writes_by_default": ["outputs", "log.md"],
       "risk_policy": "只自动生成报告；合并、删除、重命名、改结论必须进入人工确认。"
     }

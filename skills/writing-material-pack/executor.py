@@ -17,6 +17,13 @@ def execute(context: dict) -> dict:
 
     facts = [f"{i['kind']}：{i['text']}" for i in evidence_items if i.get("kind") in ("事实线索", "事实")]
     cases = [f"{i['kind']}：{i['text']}" for i in evidence_items if i.get("kind") == "案例"]
+    policy_basis = [i["text"] for i in evidence_items if i.get("kind") in ("政策依据", "法律依据")]
+    data_points = [i["text"] for i in evidence_items if i.get("kind") in ("数据", "指标")]
+    background_only = [i["text"] for i in evidence_items if i.get("evidence_level") in ("E2", "E1")]
+    do_not_write = [i["text"] for i in evidence_items if i.get("evidence_level") == "E0"]
+    formal_conclusion_candidates = [
+        i["text"] for i in evidence_items if i.get("evidence_level") in ("E5", "E4")
+    ]
     has_counter = False  # 需要人工补充
 
     enough = len(evidence_items) >= 5 and cases
@@ -53,7 +60,15 @@ def execute(context: dict) -> dict:
         "core_tension": "需要人工提炼：这个选题的核心张力是什么？" if not enough else ("围绕\u300c" + query + "\u300d的核心张力：[待人工填写]"),
         "facts": facts[:10],
         "cases": cases[:8],
-        "data_points": [],
+        "data_points": data_points,
+        "policy_basis": policy_basis,
+        "position_pack": context.get("position_pack", []),
+        "publicity_risks": context.get("publicity_risks", []),
+        "secrecy_risks": context.get("secrecy_risks", []),
+        "consultation_status": context.get("consultation_status", "未判断会签/协商状态。"),
+        "formal_conclusion_candidates": formal_conclusion_candidates,
+        "background_only": background_only,
+        "do_not_write": do_not_write,
         "timeline": timeline[:15],
         "people_orgs": [],
         "pro_views": [f"{i['text']}" for i in evidence_items[:3]],

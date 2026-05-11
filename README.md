@@ -17,8 +17,9 @@ Personal KB Steward 致力于解决个人知识库常见的“只存不看”、
 
 1. **🌱 碎片生长 (`mindseed-grow`)**：自动发现孤立的、短小的 `quicknote` 或 `inbox` 笔记，通过大语言模型 (LLM) 进行语义聚类，将它们合并为具备上下文的“种子卡片”。
 2. **🧠 工作记忆沉淀 (`work-memory-weave`)**：从你的每日会议、流水账中自动提取出可复用的“原则”、“教训”或“长期事实”。
-3. **🎯 选题与素材提炼 (`topic-insight-miner` / `writing-material-pack`)**：根据你指定的选题，自动遍历知识库寻找支撑证据、数据、案例，甚至自动帮你指出“知识缺口”与“反方观点缺失”。
-4. **🏥 知识库健康诊断 (`kb-lint-healthcheck`)**：自动扫描坏链、孤儿页面、缺乏双链的目录，并评估风险等级。
+3. **🎯 选题与素材提炼 (`topic-insight-miner` / `writing-evidence-harvester` / `writing-material-pack`)**：根据你指定的选题，自动遍历知识库寻找支撑证据、数据、案例，甚至自动帮你指出“知识缺口”与“反方观点缺失”。
+4. **📦 机关材料交接 (`official-material-handoff`)**：把 evidence-pack 与 material-pack 打包为 `official-material-workflow` 可消费的交接包，供下游进行文种判断、成稿和审稿。
+5. **🏥 知识库健康诊断 (`kb-lint-healthcheck`)**：自动扫描坏链、孤儿页面、缺乏双链的目录，并评估风险等级。
 
 ## 🛡️ 安全承诺：Dry-Run 与 人工确认队列
 

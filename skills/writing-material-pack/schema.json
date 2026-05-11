@@ -22,6 +22,15 @@
           "risks": {"type": "array", "items": {"type": "string"}},
           "gaps": {"type": "array", "items": {"type": "string"}},
           "not_recommended": {"type": "array", "items": {"type": "string"}},
+          "policy_basis": {"type": "array", "items": {"type": "string"}},
+          "data_points": {"type": "array", "items": {"type": "string"}},
+          "position_pack": {"type": "array", "items": {"type": "string"}},
+          "publicity_risks": {"type": "array", "items": {"type": "string"}},
+          "secrecy_risks": {"type": "array", "items": {"type": "string"}},
+          "consultation_status": {"type": "string"},
+          "formal_conclusion_candidates": {"type": "array", "items": {"type": "string"}},
+          "background_only": {"type": "array", "items": {"type": "string"}},
+          "do_not_write": {"type": "array", "items": {"type": "string"}},
           "confidence": {"enum": ["high", "medium", "low"]},
           "review_required": {"type": "boolean"}
         }

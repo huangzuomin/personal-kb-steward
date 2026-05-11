@@ -1,16 +1,4 @@
 {% include 'base_frontmatter.j2' with context %}
----
-title: "{{ title }}"
-type: topic-page
-status: manual_review
-stage: compiling
-sources:
-  - "{{ source_rel }}"
-  - "{{ source_target }}"
-tags:
-  - "topic"
-confidence: low
----
 # 专题：{{ title }}
 
 > **注意：** 这是一个由 `topic-research-compile` 自动生成的 Topic 雏形（Stub）。
@@ -25,10 +13,10 @@ confidence: low
 - 原始资料：[[{{ source_rel }}]]
 
 ## 来源地图
-（待补充）
+- 由当前来源自动提炼，需在后续 merge/promote 阶段与其他来源合并。
 
 ## 已知事实
-（待补充，可调用 writing-evidence-harvester 提取）
+- 可调用 writing-evidence-harvester 继续抽取证据。
 
 ## 核心概念
-（待补充）
+- 需在 concept promotion 阶段确认是否沉淀为概念页。

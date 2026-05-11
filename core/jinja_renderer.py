@@ -44,6 +44,7 @@ def render_template(template_name: str, context: dict[str, Any]) -> str:
         "tags": context.get("tags", []),
         "confidence": context.get("confidence", "low"),
         "review_required": str(bool(context.get("review_required", True))).lower(),
+        "origin": context.get("origin", {"source_paths": context.get("sources", [])}),
         **context,
     }
     if not _JINJA2_AVAILABLE:
@@ -61,6 +62,7 @@ def render_template(template_name: str, context: dict[str, Any]) -> str:
             f"tags: {json.dumps(ctx['tags'], ensure_ascii=False)}",
             f"confidence: {ctx['confidence']}",
             f"review_required: {ctx['review_required']}",
+            f"origin: {json.dumps(ctx['origin'], ensure_ascii=False)}",
             "---",
             "",
             f"# {ctx['title']}",
@@ -71,3 +73,7 @@ def render_template(template_name: str, context: dict[str, Any]) -> str:
     env = _make_env()
     tmpl = env.get_template(template_name)
     return tmpl.render(**ctx)
+
+
+def render_markdown(template_name: str, context: dict[str, Any]) -> str:
+    return render_template(template_name, context)

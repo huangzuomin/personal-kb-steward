@@ -1,0 +1,36 @@
+# {{ title }}
+
+## 任务
+
+- 主题：{{ task.topic }}
+- 请求文种：{{ task.requested_doc_type or "未指定" }}
+- 读者角色：{{ task.reader_role or "未指定" }}
+- 写作目的：{{ task.purpose or "未指定" }}
+- 截止时间：{{ task.deadline or "未指定" }}
+
+## 上游材料
+
+- Material Pack：{{ material_pack_ref }}
+- Evidence Pack：{{ evidence_pack_ref }}
+
+## 来源清单
+
+{% for item in source_refs %}- {{ item }}
+{% else %}- 暂无来源。
+{% endfor %}
+
+## 已知缺口
+
+{% for item in known_gaps %}- {{ item }}
+{% else %}- 暂无已知缺口。
+{% endfor %}
+
+## 风险提示
+
+{% for item in risk_notes %}- {{ item }}
+{% else %}- 暂无风险提示。
+{% endfor %}
+
+## 建议下游动作
+
+{{ recommended_next_step }}

@@ -6,7 +6,7 @@ from core.skill_executor import execute_skill, load_executor
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MVP_SKILLS = ["mindseed-grow", "topic-insight-miner", "writing-material-pack"]
+MVP_SKILLS = ["mindseed-grow", "topic-insight-miner", "writing-evidence-harvester", "writing-material-pack", "official-material-handoff"]
 
 
 class MvpSkillExecutorTests(unittest.TestCase):
@@ -36,6 +36,10 @@ class MvpSkillExecutorTests(unittest.TestCase):
         self.assertEqual(result["skill"], "mindseed-grow")
         self.assertGreaterEqual(len(result["pages"]), 1)
         self.assertEqual(result["pages"][0]["rel_dir_key"], "seed_dir")
+        filename = result["pages"][0]["filename"]
+        self.assertTrue(filename.endswith(".md"))
+        self.assertRegex(filename, r"[\u4e00-\u9fff]")
+        self.assertNotRegex(filename, r"^seed-[a-z0-9-]+\.md$")
 
     def test_topic_and_material_executors_return_expected_types(self):
         topic = execute_skill(ROOT, "topic-insight-miner", {
@@ -58,6 +62,26 @@ class MvpSkillExecutorTests(unittest.TestCase):
             ],
         })
         self.assertEqual(material["pages"][0]["item"]["type"], "material-pack")
+
+    def test_official_material_handoff_returns_downstream_contract(self):
+        result = execute_skill(ROOT, "official-material-handoff", {
+            "query": "会议材料报送不规范",
+            "requested_doc_type": "整改情况报告",
+            "reader_role": "分管领导",
+            "purpose": "汇报整改情况并提出下一步安排",
+            "material_pack_ref": "wiki/material-packs/material.md",
+            "evidence_pack_ref": "wiki/evidence/evidence.md",
+            "source_refs": ["wiki/evidence/evidence.md"],
+            "known_gaps": ["具体次数缺少统计口径"],
+            "risk_notes": ["不宜直接点名具体科室责任"],
+        })
+
+        item = result["pages"][0]["item"]
+        self.assertEqual(result["pages"][0]["rel_dir_key"], "reports_dir")
+        self.assertEqual(item["type"], "official-material-handoff")
+        self.assertEqual(item["task"]["requested_doc_type"], "整改情况报告")
+        self.assertIn("具体次数缺少统计口径", item["known_gaps"])
+        self.assertIn("official-material-workflow", item["recommended_next_step"])
 
 
 if __name__ == "__main__":

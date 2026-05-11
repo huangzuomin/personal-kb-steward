@@ -24,6 +24,7 @@ def frontmatter(item: dict) -> str:
         f"score: {item['score']}",
         f"confidence: {item['confidence']}",
         f"review_required: {str(bool(item['review_required'])).lower()}",
+        f"origin: {json.dumps(item.get('origin', {'source_paths': item['sources']}), ensure_ascii=False)}",
         "---",
         "",
     ])
