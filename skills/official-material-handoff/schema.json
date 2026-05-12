@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "official-material-handoff output",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "type", "task", "material_pack_ref", "evidence_pack_ref", "source_refs", "known_gaps", "risk_notes", "recommended_next_step"],
+        "properties": {
+          "title": {"type": "string"},
+          "type": {"const": "official-material-handoff"},
+          "task": {
+            "type": "object",
+            "required": ["topic", "requested_doc_type", "reader_role", "purpose", "deadline"],
+            "properties": {
+              "topic": {"type": "string"},
+              "requested_doc_type": {"type": "string"},
+              "reader_role": {"type": "string"},
+              "purpose": {"type": "string"},
+              "deadline": {"type": "string"}
+            }
+          },
+          "material_pack_ref": {"type": "string"},
+          "evidence_pack_ref": {"type": "string"},
+          "source_refs": {"type": "array", "items": {"type": "string"}},
+          "known_gaps": {"type": "array", "items": {"type": "string"}},
+          "risk_notes": {"type": "array", "items": {"type": "string"}},
+          "recommended_next_step": {"type": "string"}
+        }
+      }
+    }
+  }
+}

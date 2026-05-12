@@ -1,68 +1,54 @@
-import hashlib
 import re
-from datetime import datetime, timezone
 from typing import Any
 
 from core.jinja_renderer import render_markdown
 
 
-def slug(text: str) -> str:
-    ascii_part = re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()
-    if ascii_part:
-        return ascii_part[:72]
-    return "topic-" + hashlib.sha1(text.encode("utf-8")).hexdigest()[:10]
+def slug(text: str, fallback: str = "topic") -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", text).strip()
+    cleaned = re.sub(r"[，。；;、\s]+", "-", cleaned).strip("-")
+    cleaned = re.sub(r"-{2,}", "-", cleaned)
+    ascii_part = re.sub(r"[^A-Za-z0-9]+", "-", cleaned).strip("-").lower()
+    return (cleaned or ascii_part or fallback)[:72]
 
 
-def run_id() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+def short_hash(text: str) -> str:
+    import hashlib
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
 
 
 def render(data: dict[str, Any]) -> list[dict[str, Any]]:
-    pages = []
-    rid = run_id()
-    
-    # 1. Render source note
     source_rel = data.get("source_rel", "")
     source_name = source_rel.split("/")[-1].replace(".md", "")
-    source_target = f"wiki/sources/source-{slug(source_name)}.md"
+    source_target = f"wiki/sources/source-{slug(source_name, 'source')}-{short_hash(source_rel)}.md"
+    topic_specs = [
+        {**topic, "title": topic.get("title", f"Topic-{idx}")}
+        for idx, topic in enumerate(data.get("topics", []))
+    ]
+
     source_content = render_markdown("source_note.j2", {
         "title": f"Source: {data.get('source_title', source_name)}",
+        "type": "source-note",
+        "status": "growing",
+        "stage": "compiled",
         "source_rel": source_rel,
+        "sources": [source_rel],
+        "tags": ["source"],
+        "confidence": "high",
+        "review_required": False,
+        "origin": {"source_paths": [source_rel], "operation": "topic-research-compile"},
         "summary": data.get("source_summary", ""),
-        "topics": data.get("topics", [])
+        "topics": topic_specs,
+        "key_facts": data.get("key_facts", []),
+        "quality_flags": data.get("quality_flags", []),
+        "analysis_mode": data.get("analysis_mode", "unknown"),
     })
-    pages.append({
+    return [{
         "skill": "topic-research-compile",
         "target": source_target,
+        "sources": [source_rel],
         "content": source_content,
-        "manual_review": {
-            "type": "new_source_note",
-            "risk": "P2",
-            "reason": "自动生成 Source Note，需确认摘要准确性。",
-            "sources": [source_rel]
-        }
-    })
-
-    # 2. Render topic pages
-    for idx, topic in enumerate(data.get("topics", [])):
-        topic_title = topic.get("title", f"Topic-{idx}")
-        topic_target = f"wiki/topics/topic-{slug(topic_title)}-{rid}-{idx}.md"
-        topic_content = render_markdown("topic_stub.j2", {
-            "title": topic_title,
-            "source_rel": source_rel,
-            "source_target": source_target,
-            "content": topic.get("content", ""),
-        })
-        pages.append({
-            "skill": "topic-research-compile",
-            "target": topic_target,
-            "content": topic_content,
-            "manual_review": {
-                "type": "new_topic_stub",
-                "risk": "P1",
-                "reason": "自动从长文提炼出新 Topic 雏形，需人工确认边界与命名。",
-                "sources": [source_rel]
-            }
-        })
-        
-    return pages
+        "analysis_mode": data.get("analysis_mode", "unknown"),
+        "review_required": False,
+        "confidence": "high",
+    }]

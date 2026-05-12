@@ -5,12 +5,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.safety import safe_write_text
+from core.markdown import frontmatter
+from core.safety import append_operation_log, safe_write_text
 from core.vault import VaultIndex
 
 
+MANAGED_INDEX_MARKER = "<!-- managed-by: personal-kb-steward:index-builder -->"
+
+
+def generated_index_path(root: Path) -> Path:
+    return root / ".openclaw" / "generated-index.md"
+
+
 def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
-    """Updates the root index.md and core directory README.md files."""
+    """Updates managed index files without overwriting a user-owned root index.md."""
     root = index.root
     run_id = str(cfg.get("_run_id") or datetime.now(timezone.utc).strftime("index-%Y%m%d-%H%M%S"))
     
@@ -22,10 +30,25 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
             continue
         readme_path = dir_path / "README.md"
         if not readme_path.exists():
+            title = f"{d.title()} Index"
+            content = (
+                frontmatter(
+                    title,
+                    "run-report",
+                    "compiled",
+                    [],
+                    tags=["managed-index"],
+                    confidence="high",
+                    stage="compiled",
+                    origin={"source_paths": [], "operation": "index-builder"},
+                )
+                + f"# {title}\n\n"
+                + "- Automatically managed by Knowledge Steward.\n"
+            )
             safe_write_text(
                 cfg,
                 readme_path,
-                f"# {d.title()} Index\n\n- Automatically managed by Knowledge Steward.\n",
+                content,
                 run_id=run_id,
                 operation="create_index_readme",
                 reason="Create missing managed directory README before updating the knowledge-base index.",
@@ -40,7 +63,11 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
         log_content = log_path.read_text(encoding="utf-8")
         match = re.search(r"## Recent Runs\n\n(.*?)\n\n## Monthly Archives", log_content, re.DOTALL)
         if match:
-            lines = [line.strip() for line in match.group(1).splitlines() if line.strip()]
+            lines = [
+                re.sub(r"\[\[([^\]]+)\]\]", r"`\1`", line.strip())
+                for line in match.group(1).splitlines()
+                if line.strip()
+            ]
             recent_logs = lines[:3]
             
     recent_updates_section = "\n".join(recent_logs) if recent_logs else "- 暂无更新记录"
@@ -49,7 +76,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
     core_entrances = []
     for d in core_dirs:
         if (root / "wiki" / d).exists():
-            core_entrances.append(f"- [[wiki/{d}/README]]")
+            core_entrances.append(f"- [[wiki/{d}/README.md]]")
     entrances_section = "\n".join(core_entrances) if core_entrances else "- 暂无入口"
 
     # - 当前活跃专题 (Active Topics)
@@ -58,7 +85,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
         if note.rel.startswith("wiki/topics/") and note.metadata:
             status = note.metadata.get("status", "")
             if status == "growing":
-                active_topics.append(f"- [[{note.rel.replace('.md', '')}]]")
+                active_topics.append(f"- [[{note.rel}]]")
     
     # Only keep up to 10 active topics to avoid bloat
     active_topics = active_topics[:10]
@@ -77,6 +104,8 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
                 pending_count += 1
                 
     review_section = f"- [[.openclaw/manual-review/queue.jsonl]] ({pending_count} 项待处理)"
+    if pending_count > 0:
+        review_section = f"- Manual review queue: {pending_count} pending item(s)"
     if pending_count == 0:
         review_section = "- 暂无待处理项"
 
@@ -92,8 +121,12 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
             
     health_section = f"- [[outputs/{latest_report.name.replace('.md', '')}]]" if latest_report else "- 暂无健康报告"
 
+    if latest_report:
+        health_section = f"- [[outputs/{latest_report.name}]]"
+
     # Assemble index.md
-    index_content = f"""# Personal Knowledge Base
+    index_content = f"""{MANAGED_INDEX_MARKER}
+# Personal Knowledge Base
 
 ## 最近更新
 
@@ -116,12 +149,26 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
 {health_section}
 """
     
-    index_path = root / "index.md"
+    root_index_path = root / "index.md"
+    index_path = root_index_path
+    operation = "write_root_index"
+    reason = "Update generated knowledge-base index; existing managed file is backed up first."
+    if root_index_path.exists() and MANAGED_INDEX_MARKER not in root_index_path.read_text(encoding="utf-8-sig", errors="replace"):
+        index_path = generated_index_path(root)
+        operation = "write_generated_index"
+        reason = "Root index.md appears user-owned; write generated index to .openclaw/generated-index.md instead."
+        append_operation_log(cfg, {
+            "operation": "preserve_user_root_index",
+            "run_id": run_id,
+            "target": "index.md",
+            "generated_target": ".openclaw/generated-index.md",
+            "reason": reason,
+        })
     safe_write_text(
         cfg,
         index_path,
         index_content,
         run_id=run_id,
-        operation="write_root_index",
-        reason="Update generated knowledge-base index; existing file is backed up first.",
+        operation=operation,
+        reason=reason,
     )

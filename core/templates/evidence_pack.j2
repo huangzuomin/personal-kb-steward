@@ -57,6 +57,17 @@
 
 {{ evidence_strength }}
 
+## 机关材料证据等级
+
+- 证据等级：{{ evidence_level }}
+- 来源类型：{{ source_type }}
+- 核验状态：{{ verification_status }}
+- 可支持：{% for item in can_support %}{{ item }}{% if not loop.last %}；{% endif %}{% else %}待人工判断{% endfor %}
+- 不可支持：{% for item in cannot_support %}{{ item }}{% if not loop.last %}；{% endif %}{% else %}待人工判断{% endfor %}
+- 使用说明：{{ usage_note }}
+- 公开风险：{{ publicity_risk }}
+- 保密风险：{{ secrecy_risk }}
+
 ## 来源限制
 
 {% for item in source_limits %}- {{ item }}

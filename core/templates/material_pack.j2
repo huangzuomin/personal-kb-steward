@@ -27,6 +27,24 @@
 {% else %}- 暂无。
 {% endfor %}
 
+## 政策依据
+
+{% for item in policy_basis %}- {{ item }}
+{% else %}- 暂无明确政策依据。
+{% endfor %}
+
+## 数据口径
+
+{% for item in data_points %}- {{ item }}
+{% else %}- 暂无可用数据口径。
+{% endfor %}
+
+## 单位口径
+
+{% for item in position_pack %}- {{ item }}
+{% else %}- 暂无单位口径。
+{% endfor %}
+
 ## 时间线
 
 {% for item in timeline %}- {{ item }}
@@ -56,6 +74,40 @@
 ## 风险与缺口
 
 {% for item in risks_and_gaps %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 公开属性风险
+
+{% for item in publicity_risks %}- {{ item }}
+{% else %}- 暂无明确公开属性风险。
+{% endfor %}
+
+## 保密风险
+
+{% for item in secrecy_risks %}- {{ item }}
+{% else %}- 暂无明确保密风险。
+{% endfor %}
+
+## 会签/协商状态
+
+{{ consultation_status }}
+
+## 可用于正式结论的材料
+
+{% for item in formal_conclusion_candidates %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 只能作为背景的材料
+
+{% for item in background_only %}- {{ item }}
+{% else %}- 暂无。
+{% endfor %}
+
+## 不得写入正文的材料
+
+{% for item in do_not_write %}- {{ item }}
 {% else %}- 暂无。
 {% endfor %}
 

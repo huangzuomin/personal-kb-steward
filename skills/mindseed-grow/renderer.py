@@ -19,6 +19,7 @@ def frontmatter(item: dict) -> str:
         f"tags: {json.dumps(item.get('tags', ['动态聚类', 'seed']), ensure_ascii=False)}",
         f"confidence: {item['confidence']}",
         f"review_required: {str(bool(item['review_required'])).lower()}",
+        f"origin: {json.dumps(item.get('origin', {'source_paths': item['sources']}), ensure_ascii=False)}",
         "---",
         "",
     ])

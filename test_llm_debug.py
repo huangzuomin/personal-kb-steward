@@ -8,33 +8,37 @@ from scripts.personal_kb_steward import (
     load_state, load_processed_index, raw_seed_allowed, unprocessed_notes
 )
 
-cfg = config()
-index = build_index(cfg)
-state = load_state(cfg)
-changed = state.get("changed", [])
-print(f"Changed in state: {len(changed)}")
 
-processed = load_processed_index(cfg)
-processed_entries = list(processed.get("processed", {}).keys())
-print(f"Processed index entries: {len(processed_entries)}")
+def main() -> int:
+    cfg = config()
+    index = build_index(cfg)
+    state = load_state(cfg)
+    changed = state.get("changed", [])
+    print(f"Changed in state: {len(changed)}")
 
-# Check quicknote
-qn_changed = [n for n in changed if n.rel.startswith("quicknote/")]
-print(f"Quicknote changed: {len(qn_changed)}")
-for n in qn_changed:
-    print(f"  {n.rel}: {n.title}")
+    processed = load_processed_index(cfg)
+    processed_entries = list(processed.get("processed", {}).keys())
+    print(f"Processed index entries: {len(processed_entries)}")
 
-# Check candidates
-candidates = [
-    n for n in changed
-    if n.rel.startswith(("quicknote/", "inbox/")) or (n.rel.startswith("raw/") and raw_seed_allowed(n, cfg))
-]
-print(f"\nCandidates (mindseed-grow eligible): {len(candidates)}")
-for n in candidates:
-    print(f"  {n.rel}")
+    qn_changed = [n for n in changed if n.rel.startswith("quicknote/")]
+    print(f"Quicknote changed: {len(qn_changed)}")
+    for n in qn_changed:
+        print(f"  {n.rel}: {n.title}")
 
-# Check unprocessed
-unproc = unprocessed_notes(processed, candidates, "mindseed-grow")
-print(f"\nUnprocessed for mindseed-grow: {len(unproc)}")
-for n in unproc:
-    print(f"  {n.rel}")
+    candidates = [
+        n for n in changed
+        if n.rel.startswith(("quicknote/", "inbox/")) or (n.rel.startswith("raw/") and raw_seed_allowed(n, cfg))
+    ]
+    print(f"\nCandidates (mindseed-grow eligible): {len(candidates)}")
+    for n in candidates:
+        print(f"  {n.rel}")
+
+    unproc = unprocessed_notes(processed, candidates, "mindseed-grow")
+    print(f"\nUnprocessed for mindseed-grow: {len(unproc)}")
+    for n in unproc:
+        print(f"  {n.rel}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

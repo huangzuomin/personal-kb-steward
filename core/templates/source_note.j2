@@ -1,15 +1,4 @@
 {% include 'base_frontmatter.j2' with context %}
----
-title: "{{ title }}"
-type: source-note
-status: active
-stage: compiled
-sources:
-  - "{{ source_rel }}"
-tags:
-  - "source"
-confidence: high
----
 # {{ title }}
 
 ## 原始来源
@@ -18,7 +7,30 @@ confidence: high
 ## 核心摘要
 {{ summary }}
 
-## 提取的专题
-{% for topic in topics %}
-- [[wiki/topics/topic-{{ topic.title|replace(' ', '-')|lower[:72] }}.md|{{ topic.title }}]]
+## 关键事实
+{% if key_facts %}
+{% for fact in key_facts %}
+- {{ fact }}
 {% endfor %}
+{% else %}
+- 待补充关键事实。
+{% endif %}
+
+## 提取的专题
+{% if topics %}
+{% for topic in topics %}
+- {{ topic.title }}：{{ topic.content }}
+{% endfor %}
+{% else %}
+- 待补充专题。
+{% endif %}
+
+## 质量标记
+- 分析模式：{{ analysis_mode }}
+{% if quality_flags %}
+{% for flag in quality_flags %}
+- {{ flag }}
+{% endfor %}
+{% else %}
+- 暂无明显质量标记。
+{% endif %}

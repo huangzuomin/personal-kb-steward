@@ -8,10 +8,13 @@ from renderer import render
 
 
 def safe_filename(title: str) -> str:
-    """把标题转成安全的文件系统文件名，保留中文和可见字符。"""
+    """把 seed 标题转成面向人的中文文件名，保留中文语义。"""
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', ' ', title).strip()
-    cleaned = re.sub(r'[-\s]+', '-', cleaned).strip('-')
-    return cleaned[:200] or "seed"
+    cleaned = re.sub(r"[：:，,。；;、/\\\s]+", "-", cleaned).strip("-")
+    cleaned = re.sub(r"-{2,}", "-", cleaned)
+    if cleaned.lower().startswith("seed-"):
+        cleaned = cleaned[5:].strip("-")
+    return cleaned[:80] or "未命名种子卡"
 
 
 def slug(text: str) -> str:
@@ -61,6 +64,7 @@ def execute(context: dict) -> dict:
             "tags": cluster.get("tags", ["动态聚类"]),
             "confidence": confidence,
             "review_required": review,
+            "origin": {"source_paths": cluster["sources"], "operation": "mindseed-grow"},
             "manual_review": manual_review,
         }
         pages.append({

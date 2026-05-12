@@ -39,6 +39,7 @@ def execute(context: dict) -> dict:
         "score": score,
         "confidence": "medium" if enough else "low",
         "review_required": not enough,
+        "origin": {"source_paths": sources, "operation": "topic-insight-miner"},
         "related": [],
     }
     return {

@@ -30,9 +30,11 @@ def frontmatter(
     confidence: str = "medium",
     review_required: bool | None = None,
     stage: str | None = None,
+    origin: dict[str, Any] | None = None,
 ) -> str:
     if review_required is None:
         review_required = status in {"manual_review", "conflict"} or stage in {"insufficient", "weak", "unsupported", "needs_context"}
+    origin_data = origin or {"source_paths": source}
     return "\n".join([
         "---",
         f"title: {json.dumps(title, ensure_ascii=False)}",
@@ -46,6 +48,7 @@ def frontmatter(
         f"tags: {json.dumps(tags or [], ensure_ascii=False)}",
         f"confidence: {confidence}",
         f"review_required: {str(review_required).lower()}",
+        f"origin: {json.dumps(origin_data, ensure_ascii=False)}",
         "---",
         "",
     ])

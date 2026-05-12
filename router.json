@@ -23,6 +23,11 @@
       "match_any": ["准备写作素材", "写作素材", "材料包", "写作准备", "写作结构", "组稿", "成稿前", "素材包", "material pack"]
     },
     {
+      "entry": "init_kb",
+      "primary_skill": "kb-initialize",
+      "match_any": ["初始化知识库", "初始化", "全量整理", "初始化整理", "init-kb"]
+    },
+    {
       "entry": "organize_kb",
       "primary_skill": "mindseed-grow",
       "match_any": ["整理知识库", "整理", "碎片", "随手记", "quicknote", "inbox", "seed", "生长"]
@@ -39,6 +44,7 @@
     "case-story-bank-builder": "prepare_writing",
     "project-review-synthesizer": "weave_work_memory",
     "topic-research-compile": "discover_topics",
-    "mindseed-grow": "organize_kb"
+    "mindseed-grow": "organize_kb",
+    "kb-initialize": "init_kb"
   }
 }

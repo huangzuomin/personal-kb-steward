@@ -47,7 +47,17 @@ def changed_notes(index: VaultIndex, state: dict[str, Any]) -> list[Note]:
 def load_processed_index(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     if cfg is None:
         return {"version": 1, "processed": {}}
-    return read_json(processed_index_path(cfg), {"version": 1, "processed": {}})
+    data = read_json(processed_index_path(cfg), {"version": 1, "processed": {}})
+    if not isinstance(data, dict):
+        return {"version": 1, "processed": {}, "_schema_error": "processed-index root is not an object"}
+    if "processed" not in data:
+        message = "processed-index schema mismatch: expected key 'processed'"
+        if "records" in data:
+            message += "; found legacy/external key 'records'"
+        return {"version": 1, "processed": {}, "_schema_error": message, "_raw_keys": sorted(data.keys())}
+    if not isinstance(data.get("processed"), dict):
+        return {"version": 1, "processed": {}, "_schema_error": "processed-index key 'processed' is not an object"}
+    return data
 
 
 def save_processed_index(data: dict[str, Any], cfg: dict[str, Any], timestamp: str) -> None:
@@ -69,7 +79,11 @@ def processed_record(data: dict[str, Any], note: Note, skill: str) -> dict[str, 
 
 def is_processed(data: dict[str, Any], note: Note, skill: str) -> bool:
     record = processed_record(data, note, skill)
-    return bool(record and record.get("sha256") == note.sha256)
+    return bool(
+        record
+        and record.get("sha256") == note.sha256
+        and record.get("operation_status") in {"created", "skipped"}
+    )
 
 
 def unprocessed_notes(data: dict[str, Any], notes: list[Note], skill: str) -> list[Note]:
@@ -84,6 +98,10 @@ def update_processed_index(index: VaultIndex, cfg: dict[str, Any], operations: l
         if not skill:
             continue
         outputs = op.get("created", [])
+        source_outputs = op.get("source_outputs", {})
+        has_review_gate = bool(op.get("manual_reviews")) or bool(op.get("review_required")) or str(op.get("confidence", "")).lower() == "low"
+        has_issues = bool(op.get("issues"))
+        operation_status = "needs_review" if has_review_gate or has_issues else ("created" if outputs else "skipped")
         for rel in op.get("inputs", []):
             note = index.by_rel.get(rel)
             if not note:
@@ -95,10 +113,11 @@ def update_processed_index(index: VaultIndex, cfg: dict[str, Any], operations: l
             })
             file_record["title"] = note.title
             file_record["current_sha256"] = note.sha256
+            rel_outputs = source_outputs.get(rel, outputs)
             file_record["skills"][skill] = {
                 "sha256": note.sha256,
                 "processed_at": timestamp,
-                "outputs": outputs,
-                "operation_status": "created" if outputs else "skipped",
+                "outputs": rel_outputs,
+                "operation_status": operation_status,
             }
     save_processed_index(data, cfg, timestamp)
