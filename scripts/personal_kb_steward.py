@@ -1019,7 +1019,7 @@ def command_status(cfg: dict[str, Any]) -> int:
     schema_error = load_processed_index(cfg).get("_schema_error")
     changed = changed_notes(index, state)
     print(f"智能体：{cfg['agent_name_cn']}（{cfg['agent']}）")
-    print(f"知识搴擄細{index.root}")
+    print(f"知识库：{index.root}")
     print(f"笔记数量：{len(index.notes)}")
     print(f"自上次运行后的变更：{len(changed)}")
     print(f"Processed index 来源记录：{len(processed)}")
@@ -1049,7 +1049,7 @@ def command_lint(cfg: dict[str, Any], write: bool = False) -> int:
 def command_run(cfg: dict[str, Any], apply: bool = False, use_llm: bool = True, include_all: bool = False) -> int:
     if apply:
         print("安全执行模型已收口：run --apply 不再直接写入知识库。")
-    plan = make_execution_plan(cfg, "姣忔棩知识鐢熼暱", scheduled=True, include_all=include_all)
+    plan = make_execution_plan(cfg, "每日知识生长", scheduled=True, include_all=include_all)
     path = write_execution_plan(cfg, plan)
     queued = write_manual_review_queue(cfg, plan)
     print_plan_summary(plan, path, queued)
@@ -1441,7 +1441,7 @@ def resolve_run_manifest(cfg: dict[str, Any], ref: str) -> Path:
     if len(matches) == 1:
         return matches[0].resolve()
     if not matches:
-        raise SystemExit(f"鎵句笉鍒?run manifest：{ref}")
+        raise SystemExit(f"找不到 run manifest：{ref}")
     raise SystemExit(f"run 引用不唯一：{ref}")
 
 
