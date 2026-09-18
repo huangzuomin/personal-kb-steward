@@ -14,7 +14,7 @@ from core.finalizer import make_finalize_plan
 
 class WorkflowDeclarationTests(unittest.TestCase):
     def make_cfg(self, kb: Path) -> dict:
-        cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+        cfg = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8-sig"))
         cfg["knowledge_base"] = str(kb)
         cfg["state_file"] = str(kb / ".state.json")
         cfg["safety"]["plans_dir"] = str(kb / ".openclaw" / "plans")
