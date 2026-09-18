@@ -472,7 +472,8 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
     for note in index.notes:
         if note.rel.startswith("wiki/") and not note.metadata:
             missing_meta.append(note.rel)
-        status = str(note.metadata.get("status", "")).strip()\n        stage = str(note.metadata.get("stage", "")).strip()
+        status = str(note.metadata.get("status", "")).strip()
+        stage = str(note.metadata.get("stage", "")).strip()
         if status and status not in legal_status and status in legal_stage:
             stage_migrations.append({"file": note.rel, "current_status": status, "suggested_status": "growing", "suggested_stage": status})
         elif status and status not in legal_status:
