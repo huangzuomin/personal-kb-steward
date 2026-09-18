@@ -89,3 +89,10 @@ stage: candidate
 或按具体语义使用 `manual_review`、`compiled`、`conflict` 等生命周期状态。
 
 当前 lint 会把这类历史页面列入 `stage_migrations`，不再计入非法 `status_issues`。
+
+
+## Runtime 约束
+
+- 判断流程态必须读取 `stage`，不能把 `active`、`candidate` 等流程值当作 `status`。
+- `status` 与 `stage` 可以在个别词值上重合，但代码必须按字段语义判断，不能混用。
+- lint 中的低置信度活跃页规则使用 `confidence: low + stage: active`。
