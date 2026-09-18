@@ -25,12 +25,15 @@ source file -> skill -> source sha256 -> outputs
 
 ## 当前覆盖
 
-MVP 阶段覆盖：
+processed index 对所有带有具体 `skill + inputs` 的成功 apply 操作生效。当前主要覆盖：
 
 - `mindseed-grow`
 - `work-memory-weave`
+- `raw-ingest-router`
+- `topic-research-compile`
+- 其他通过 `apply-plan` 落盘且能记录具体输入来源的 Skill
 
-后续阶段可扩展到 topic、evidence、material 等 query 型任务。
+query 型任务如果没有稳定的具体输入来源，不应仅凭查询文本标记为“已处理”；后续 Dependency DAG 会继续替代当前的文件级幂等模型。
 
 ## 查看
 
