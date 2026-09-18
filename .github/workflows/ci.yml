@@ -65,17 +65,24 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Check syntax and whitespace
+        shell: python
         run: |
-          python -m compileall -q core scripts tests
-          git diff --check
+          import subprocess, sys
+          subprocess.run([sys.executable, '-m', 'compileall', '-q', 'core', 'scripts', 'tests'], check=True)
+          subprocess.run(['git', 'diff', '--check'], check=True)
 
       - name: Run full tests without local config
+        shell: python
         run: |
-          python -c "from pathlib import Path; assert not Path('config.json').exists()"
-          python -m pytest -q
-          python -c "from pathlib import Path; assert not Path('config.json').exists()"
+          import subprocess, sys
+          from pathlib import Path
+          assert not Path('config.json').exists()
+          subprocess.run([sys.executable, '-m', 'pytest', '-q'], check=True)
+          assert not Path('config.json').exists()
 
       - name: Validate example configuration separately
+        shell: python
         run: |
-          python -c "import shutil; shutil.copyfile('config.example.json', 'config.json')"
-          python scripts/validate_config.py
+          import shutil, subprocess, sys
+          shutil.copyfile('config.example.json', 'config.json')
+          subprocess.run([sys.executable, 'scripts/validate_config.py'], check=True)
