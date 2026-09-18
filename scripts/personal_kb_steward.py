@@ -26,6 +26,8 @@ try:
     sys.stderr.reconfigure(encoding="utf-8")
 except AttributeError:
     pass
+from core.run_records import assert_run_can_start, save_run_manifest, record_failed_attempt, write_observed_page
+from uuid import uuid4
 from core.plan_objects import bind_plan_objects, validate_object_writes, object_manifest_fields, reconcile_created_pages
 from core.skill_runtime import run_skill_runtime
 from core.log_manager import write_run_log
@@ -38,6 +40,7 @@ from core.safety import (
     backup_root,
     operation_log_path,
     recovery_hint,
+    require_delete_only_rollback,
     safe_delete_file,
     safe_write_text,
     user_next_step,
@@ -1159,32 +1162,7 @@ def resolve_plan_ref(cfg: dict[str, Any], ref: str) -> Path:
 
 
 def fail_apply_plan(cfg: dict[str, Any], run_id_value: str, plan_path: Path | None, root: Path | None, created: list[dict[str, Any]], exc: BaseException) -> None:
-    cfg["_run_id"] = run_id_value
-    failed_manifest = {
-        "run_id": run_id_value,
-        "failed_at": stamp(),
-        "plan_path": str(plan_path) if plan_path else "",
-        "knowledge_base": str(root) if root else "",
-        "created": created,
-        "backup_dir": str(backup_root(cfg) / run_id_value),
-        "operation_log": str(operation_log_path(cfg)),
-        "recovery_hint": recovery_hint(cfg, run_id_value),
-        "next_step": user_next_step(exc),
-        "status": "failed",
-        "error": str(exc),
-    }
-    manifest_path = write_run_manifest(cfg, failed_manifest)
-    append_operation_log(cfg, {
-        "operation": "apply_plan_failed",
-        "run_id": run_id_value,
-        "error": str(exc),
-        "next_step": user_next_step(exc),
-        "manifest_path": str(manifest_path),
-    })
-    print(f"apply-plan 失败：{exc}", file=sys.stderr)
-    print(f"下一步：{user_next_step(exc)}", file=sys.stderr)
-    print(recovery_hint(cfg, run_id_value), file=sys.stderr)
-    print(f"失败 run manifest：{manifest_path}", file=sys.stderr)
+    record_failed_attempt(cfg, run_id_value, plan_path, root, created, exc)
 
 
 def assert_safe_rel_write(cfg: dict[str, Any], rel_path: str) -> None:
@@ -1277,17 +1255,10 @@ def preflight_apply_pages(
         targets.append((page, target))
     return targets
 def write_run_manifest(cfg: dict[str, Any], manifest: dict[str, Any]) -> Path:
-    target = runs_dir(cfg) / f"{manifest['run_id']}.json"
-    safe_write_text(
-        cfg,
-        target,
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-        run_id=str(cfg.get("_run_id") or manifest["run_id"]),
-        operation="write_run_manifest",
-        reason="Persist run manifest with backup if an earlier manifest exists.",
-    )
-    return target
+    return save_run_manifest(cfg, manifest)
+
 def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = False) -> int:
+    cfg = {**cfg, "_attempt_id": str(uuid4()), "_write_started": False}
     created: list[dict[str, Any]] = []
     plan_path: Path | None = None
     root: Path | None = None
@@ -1304,6 +1275,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
         root = kb_root(cfg)
         apply_run_id = str(plan.get("run_id") or run_id())
         cfg["_run_id"] = apply_run_id
+        assert_run_can_start(cfg, apply_run_id)
         skipped_existing: list[str] = []
         if plan.get("entry") == "init_kb":
             pages, skipped_existing = split_existing_pages(cfg, pages)
@@ -1319,6 +1291,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
             "skipped_existing_pages": skipped_existing,
             "backup_dir": str(backup_root(cfg) / apply_run_id),
         })
+        cfg["_phase"] = "preflight"
         targets = preflight_apply_pages(cfg, root, pages, allow_reviewed=allow_reviewed)
         validate_object_writes(build_index(cfg), pages, schema_version=plan.get("object_schema_version"))
         append_operation_log(cfg, {
@@ -1327,25 +1300,11 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
             "targets": [str(target) for _, target in targets],
             "skipped_existing_pages": skipped_existing,
         })
+        cfg["_phase"] = "writing_pages"
         for page, target in targets:
-            rel_path = page["rel_path"]
-            safe_write_text(
-                cfg,
-                target,
-                page["content"],
-                run_id=apply_run_id,
-                operation="apply_plan_update_page" if page.get("operation") == "update" else "apply_plan_create_page",
-                reason="Apply reviewed plan page; original raw/quicknote/inbox files are protected.",
-            )
-            created.append({
-                **object_manifest_fields(page),
-                "rel_path": rel_path,
-                "sha256": sha256_file(target),
-                "skill": page.get("skill"),
-                "operation": page.get("operation", "create"),
-                "sources": page.get("sources", []),
-                "origin": page.get("origin") or {"source_paths": page.get("sources", [])},
-            })
+            cfg["_write_started"] = True
+            write_observed_page(cfg, page, target, created, writer=safe_write_text,
+                                identity=object_manifest_fields(page))
 
         reconcile = reconcile_created_pages(root, created)
         if not reconcile["ok"]:
@@ -1374,9 +1333,13 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
             op["inputs"] = inputs
             op["processed"] = len(inputs)
             operations.append(op)
+        cfg["_phase"] = "write_run_log"
         write_run_log(index, cfg, operations, plan.get("task", "apply-plan"))
+        cfg["_phase"] = "update_processed_index"
         update_processed_index(index, cfg, operations)
+        cfg["_phase"] = "save_state"
         save_state(cfg, build_index(cfg), operations)
+        cfg["_phase"] = "update_index"
         update_index(build_index(cfg), cfg)
         manifest = {
             "run_id": apply_run_id,
@@ -1391,6 +1354,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
             "reconcile": reconcile,
             "status": "applied",
         }
+        cfg["_phase"] = "finalize_manifest"
         manifest_path = write_run_manifest(cfg, manifest)
         append_operation_log(cfg, {
             "operation": "apply_plan_complete",
@@ -1434,8 +1398,7 @@ def resolve_run_manifest(cfg: dict[str, Any], ref: str) -> Path:
 def command_rollback(cfg: dict[str, Any], ref: str) -> int:
     manifest_path = resolve_run_manifest(cfg, ref)
     manifest = read_json(manifest_path, {})
-    if any(item.get("operation") == "update" for item in manifest.get("created", [])):
-        raise SystemExit("该运行包含更新页面，不能按新建页面删除回滚；请从备份恢复，事务回滚尚未实现。")
+    require_delete_only_rollback(manifest)
     root = kb_root(cfg)
     rollback_run_id = f"rollback-{manifest.get('run_id') or run_id()}"
     cfg["_run_id"] = rollback_run_id

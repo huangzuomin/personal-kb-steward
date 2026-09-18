@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import json
 import re
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import sha256_text
+from .plan_objects import update_base
 from .vault import Note, build_index, parse_frontmatter
 
 
@@ -117,7 +119,7 @@ def _frontmatter(meta: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _page(kind: str, target: str, title: str, type_: str, sources: list[str], related: list[str], body: str, run_id: str, exists: bool) -> dict[str, Any]:
+def _page(kind: str, target: str, title: str, type_: str, sources: list[str], related: list[str], body: str, run_id: str, existing: Note | None) -> dict[str, Any]:
     today = dt.date.today().isoformat()
     content = "\n".join([
         "---",
@@ -139,12 +141,11 @@ def _page(kind: str, target: str, title: str, type_: str, sources: list[str], re
         "",
         body,
     ])
-    return {"skill": "kb-finalize", "operation": "update" if exists else "create", "rel_path": target, "target": target, "sources": sources, "origin": {"source_paths": sources, "operation": "kb-finalize", "run_id": run_id}, "content_sha256": sha256_text(content), "content": content, "review_required": False, "confidence": "medium"}
+    return {**(update_base(existing) if existing else {}), "skill": "kb-finalize", "operation": "update" if existing else "create", "rel_path": target, "target": target, "sources": sources, "origin": {"source_paths": sources, "operation": "kb-finalize", "run_id": run_id}, "content_sha256": sha256_text(content), "content": content, "review_required": False, "confidence": "medium"}
 
 
 def _update_source_note(note: Note, related: list[str], tags: list[str], run_id: str) -> dict[str, Any] | None:
-    text = note.path.read_text(encoding="utf-8-sig", errors="replace")
-    meta, body = parse_frontmatter(text)
+    meta, body = copy.deepcopy(note.metadata), note.body
     current_related = list(meta.get("related") or [])
     current_tags = list(meta.get("tags") or [])
     merged_related = sorted(dict.fromkeys([*current_related, *related]))
@@ -158,7 +159,7 @@ def _update_source_note(note: Note, related: list[str], tags: list[str], run_id:
     meta["updated"] = dt.date.today().isoformat()
     meta.setdefault("origin", {"source_paths": meta.get("sources", []), "operation": "topic-research-compile"})
     content = _frontmatter(meta) + updated_body
-    return {"skill": "kb-finalize", "operation": "update", "rel_path": note.rel, "target": note.rel, "sources": list(meta.get("sources") or []), "origin": {"source_paths": list(meta.get("sources") or []), "operation": "kb-finalize", "run_id": run_id}, "content_sha256": sha256_text(content), "content": content, "review_required": False, "confidence": "medium"}
+    return {**update_base(note), "skill": "kb-finalize", "operation": "update", "rel_path": note.rel, "target": note.rel, "sources": list(meta.get("sources") or []), "origin": {"source_paths": list(meta.get("sources") or []), "operation": "kb-finalize", "run_id": run_id}, "content_sha256": sha256_text(content), "content": content, "review_required": False, "confidence": "medium"}
 
 
 def make_finalize_plan(cfg: dict[str, Any], *, plan_run_id: str, stamp: str, apply_updates: bool = False) -> dict[str, Any]:
@@ -244,7 +245,7 @@ def make_finalize_plan(cfg: dict[str, Any], *, plan_run_id: str, stamp: str, app
         ("wiki/concepts/人工智能创新发展先行市.md", "人工智能创新发展先行市", "concept-page", concept_body, "concept"),
         ("wiki/cases/温州AI应用与机构建设案例线索.md", "温州AI应用与机构建设案例线索", "case-story", case_body, "case"),
     ]:
-        pages.append(_page(kind, target, title, type_, sources, [x for x in related_agg if x != target], body, plan_run_id, (index.root / target).exists()))
+        pages.append(_page(kind, target, title, type_, sources, [x for x in related_agg if x != target], body, plan_run_id, index.by_rel.get(target)))
     token_map = {n.rel: _tokens(n.title + "\n" + n.body[:4000]) for n in source_notes}
     for note in source_notes:
         scores = [(len(token_map[note.rel] & toks), rel) for rel, toks in token_map.items() if rel != note.rel]

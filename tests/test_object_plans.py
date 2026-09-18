@@ -6,8 +6,9 @@ from pathlib import Path
 
 from core.config import sha256_text
 from core.knowledge_objects import ObjectIdentityError, new_object_id
-from core.plan_objects import bind_plan_objects, validate_object_writes
-from core.vault import build_index
+from core.plan_objects import bind_plan_objects, validate_object_writes, update_base
+from core.run_records import RunRecordConflict
+from core.vault import build_index, read_note
 from scripts import personal_kb_steward as steward
 
 
@@ -40,7 +41,8 @@ class ObjectPlanTests(unittest.TestCase):
 
     def page(self, path="wiki/topics/a.md", operation="create", content=None):
         text = self.content() if content is None else content
-        return {"skill": "topic-research-compile", "operation": operation, "rel_path": path,
+        base = update_base(read_note(self.root / path, self.root)) if operation == "update" and (self.root / path).is_file() else {}
+        return {**base, "skill": "topic-research-compile", "operation": operation, "rel_path": path,
                 "sources": ["raw/a.md"], "content": text, "content_sha256": sha256_text(text),
                 "review_required": False, "confidence": "medium"}
 
@@ -116,9 +118,16 @@ class ObjectPlanTests(unittest.TestCase):
         path = self.persist(self.plan(self.page(operation="update")))
         steward.command_apply_plan(self.cfg, str(path))
         before = (self.root / "wiki/topics/a.md").read_bytes()
-        with self.assertRaises(ObjectIdentityError):
+        manifest = self.root / ".openclaw/runs/object-test.json"
+        audit_before = manifest.read_bytes()
+        backups = {p: p.read_bytes() for p in (self.root / ".openclaw/backups").rglob("*") if p.is_file()}
+        with self.assertRaises(RunRecordConflict):
             steward.command_apply_plan(self.cfg, str(path))
         self.assertEqual((self.root / "wiki/topics/a.md").read_bytes(), before)
+        self.assertEqual(manifest.read_bytes(), audit_before)
+        self.assertEqual(backups, {p: p.read_bytes() for p in (self.root / ".openclaw/backups").rglob("*") if p.is_file()})
+        with self.assertRaisesRegex(SystemExit, "包含更新页面"):
+            steward.command_rollback(self.cfg, "object-test")
 
     def test_legacy_page_is_adopted_only_on_explicit_update(self):
         target = self.install_note("wiki/topics/a.md", self.content("Legacy"))
@@ -140,6 +149,7 @@ class ObjectPlanTests(unittest.TestCase):
         self.install_note("wiki/topics/a.md", self.content("Identified", new_object_id()))
         before = (self.root / "wiki/topics/a.md").read_bytes()
         plan = self.plan(self.page(operation="update"))
+        plan["run_id"] = "legacy-strip-attempt"
         path.write_text(json.dumps(plan), encoding="utf-8")
         with self.assertRaises(ObjectIdentityError):
             steward.command_apply_plan(self.cfg, str(path))

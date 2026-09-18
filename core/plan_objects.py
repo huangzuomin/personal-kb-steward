@@ -54,6 +54,24 @@ def _current(index: VaultIndex, rel: str) -> Note | None:
     return read_note(target, index.root.resolve()) if target.is_file() else None
 
 
+def update_base(note: Note) -> dict[str, Any]:
+    """Capture from the exact Note snapshot used to generate an update, not save-time IO."""
+    identity = identity_from_metadata(note.metadata)
+    return {"base_sha256": note.sha256, "base_revision": identity[1] if identity else None,
+            "base_object_id": identity[0] if identity else None}
+
+
+def _require_generation_base(page: dict[str, Any], current: Note) -> None:
+    expected = update_base(current)
+    if not all(key in page for key in expected):
+        raise ObjectIdentityError(f"Update is missing its generation-time base: {current.rel}; regenerate the proposal")
+    if (not isinstance(page["base_sha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", page["base_sha256"])
+            or page["base_revision"] is not None and type(page["base_revision"]) is not int
+            or any(page[key] != value for key, value in expected.items())):
+        raise ObjectIdentityError(f"Generation base revision/hash conflict: {current.rel}; regenerate the proposal")
+
+
 def bind_plan_objects(index: VaultIndex, plan: dict[str, Any]) -> None:
     """Finalize plan identities once, before serializing it for human review.
 
@@ -85,6 +103,8 @@ already bound plan never increments revisions, changes IDs, or re-bases hashes.
         current = target_note if operation == "update" else None
         if operation == "update" and current is None:
             raise ObjectIdentityError(f"Missing update target: {rel}")
+        if current:
+            _require_generation_base(page, current)
         old = identity_from_metadata(current.metadata) if current else None
         object_id = old[0] if old else new_object_id()
         revision = old[1] + 1 if old else 1
@@ -93,9 +113,6 @@ already bound plan never increments revisions, changes IDs, or re-bases hashes.
             raise ObjectIdentityError(f"Could not safely stamp identity fields: {rel}")
         page.update(object_id=object_id, revision=revision, canonical_path=rel,
                     content=content, content_sha256=sha256_text(content))
-        if current:
-            page["base_revision"] = old[1] if old else None
-            page["base_sha256"] = current.sha256
     plan["planned_pages"] = pages
     plan["object_schema_version"] = OBJECT_SCHEMA_VERSION
 
@@ -171,7 +188,7 @@ def reconcile_created_pages(root: Path, created: list[dict[str, Any]]) -> dict[s
         target = root / rel
         if not target.exists():
             missing.append(rel)
-        elif item.get("sha256") and sha256_file(target) != item.get("sha256"):
+        elif (item.get("sha256") and sha256_file(target) != item["sha256"]) or (item.get("expected_sha256") and sha256_file(target) != item["expected_sha256"]):
             hash_mismatch.append(rel)
     duplicate_created = {rel: count for rel, count in Counter(rels).items() if rel and count > 1}
     return {
