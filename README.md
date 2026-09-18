@@ -132,3 +132,21 @@ python scripts\personal_kb_steward.py review approve <ID> --reason "确认无误
 - [路径与双链治理红线](docs/path-link-governance.md)
 - [幂等追踪 (Processed Index)](docs/processed-index.md)
 - [MVP Skill 运行机制](docs/mvp-runtime.md)
+
+
+---
+
+## 开发与测试
+
+仓库测试应能在 clean clone 环境运行，不依赖本机已有的 `config.json`。
+
+本地验证：
+
+```bash
+python -m pip install -r requirements.txt
+cp config.example.json config.json
+python scripts/validate_config.py
+python -m pytest -q
+```
+
+GitHub Actions 会在 Python 3.11 和 3.12 上执行同一套配置校验与测试。
