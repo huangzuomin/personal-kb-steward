@@ -150,3 +150,10 @@ python -m pytest -q
 ```
 
 GitHub Actions 会在 Python 3.11 和 3.12 上执行同一套配置校验与测试。
+
+
+## 稳定知识对象
+
+新知识页在 plan 序列化时由程序分配 `object_id` 与 `revision`，更新保留身份；`canonical_path` 从真实文件路径派生。旧页继续可读，不自动批量迁移。重复 ID 与更新基线冲突会在落盘前阻断。
+
+完整契约、兼容策略和暂不支持的事务能力见 [Stable Knowledge Objects](docs/stable-knowledge-objects.md)。

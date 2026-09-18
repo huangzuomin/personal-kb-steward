@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Personal knowledge-base steward runtime."""
 from __future__ import annotations
 import argparse
@@ -26,6 +26,7 @@ try:
     sys.stderr.reconfigure(encoding="utf-8")
 except AttributeError:
     pass
+from core.plan_objects import bind_plan_objects, validate_object_writes, object_manifest_fields, reconcile_created_pages
 from core.skill_runtime import run_skill_runtime
 from core.log_manager import write_run_log
 from core.index_builder import update_index
@@ -517,6 +518,7 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
         "P2": [],
         "P3": [],
     }
+    risk_buckets["P1"].extend(index.objects.issues)
     for item in source_issues:
         risk_buckets["P1"].append({"kind": "source_issue", **item})
     for item in mock_content:
@@ -550,6 +552,9 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
     health_score = max(0, 100 - len(risk_buckets["P0"]) * 10 - len(risk_buckets["P1"]) * 3 - len(risk_buckets["P2"]) - min(len(risk_buckets["P3"]), 20))
     return {
         "skill": "kb-lint-healthcheck",
+        "object_count": len(index.objects.by_id),
+        "legacy_object_count": len(index.objects.legacy_paths),
+        "object_identity_issues": index.objects.issues,
         "total_notes": len(index.notes),
         "risk_count": risk_count,
         "health_score": health_score,
@@ -614,6 +619,7 @@ def plan_filename(plan: dict[str, Any]) -> str:
     safe_entry = slug(str(plan.get("entry") or "task"), "entry")
     return f"{plan['run_id']}-{safe_entry}.json"
 def write_execution_plan(cfg: dict[str, Any], plan: dict[str, Any]) -> Path:
+    bind_plan_objects(build_index(cfg), plan)
     target_dir = plan_dir(cfg)
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / plan_filename(plan)
@@ -1281,29 +1287,6 @@ def write_run_manifest(cfg: dict[str, Any], manifest: dict[str, Any]) -> Path:
         reason="Persist run manifest with backup if an earlier manifest exists.",
     )
     return target
-def reconcile_created_pages(root: Path, created: list[dict[str, Any]]) -> dict[str, Any]:
-    rels = [str(item.get("rel_path") or "") for item in created]
-    unique_rels = sorted(set(rel for rel in rels if rel))
-    missing = []
-    hash_mismatch = []
-    for item in created:
-        rel = str(item.get("rel_path") or "")
-        if not rel:
-            continue
-        target = root / rel
-        if not target.exists():
-            missing.append(rel)
-        elif item.get("sha256") and sha256_file(target) != item.get("sha256"):
-            hash_mismatch.append(rel)
-    duplicate_created = {rel: count for rel, count in Counter(rels).items() if rel and count > 1}
-    return {
-        "created_count": len(created),
-        "unique_created_count": len(unique_rels),
-        "duplicate_created": duplicate_created,
-        "missing": missing,
-        "hash_mismatch": hash_mismatch,
-        "ok": len(created) == len(unique_rels) and not missing and not hash_mismatch,
-    }
 def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = False) -> int:
     created: list[dict[str, Any]] = []
     plan_path: Path | None = None
@@ -1337,6 +1320,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
             "backup_dir": str(backup_root(cfg) / apply_run_id),
         })
         targets = preflight_apply_pages(cfg, root, pages, allow_reviewed=allow_reviewed)
+        validate_object_writes(build_index(cfg), pages, schema_version=plan.get("object_schema_version"))
         append_operation_log(cfg, {
             "operation": "apply_plan_preflight_ok",
             "run_id": apply_run_id,
@@ -1354,6 +1338,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
                 reason="Apply reviewed plan page; original raw/quicknote/inbox files are protected.",
             )
             created.append({
+                **object_manifest_fields(page),
                 "rel_path": rel_path,
                 "sha256": sha256_file(target),
                 "skill": page.get("skill"),
@@ -1449,6 +1434,8 @@ def resolve_run_manifest(cfg: dict[str, Any], ref: str) -> Path:
 def command_rollback(cfg: dict[str, Any], ref: str) -> int:
     manifest_path = resolve_run_manifest(cfg, ref)
     manifest = read_json(manifest_path, {})
+    if any(item.get("operation") == "update" for item in manifest.get("created", [])):
+        raise SystemExit("该运行包含更新页面，不能按新建页面删除回滚；请从备份恢复，事务回滚尚未实现。")
     root = kb_root(cfg)
     rollback_run_id = f"rollback-{manifest.get('run_id') or run_id()}"
     cfg["_run_id"] = rollback_run_id
