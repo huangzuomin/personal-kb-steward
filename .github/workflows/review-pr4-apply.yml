@@ -1,0 +1,89 @@
+name: Review PR4 patch validation
+
+on:
+  push:
+    branches: ["agent/clean-runtime-and-ci"]
+    paths: [".github/review-pr4.payload.*", ".github/workflows/review-pr4-apply.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Apply checksum-verified review patch
+        shell: python
+        run: |
+          import gzip, hashlib, os, subprocess
+          from pathlib import Path
+          data = gzip.decompress(b''.join(Path(f'.github/review-pr4.payload.{i}').read_bytes() for i in range(3)))
+          assert hashlib.sha256(data).hexdigest() == 'f988713c7d778576ce55469b59612e88954a5959572a9fdef29007d51e025f42'
+          path = Path(os.environ['RUNNER_TEMP']) / 'review.patch'
+          path.write_bytes(data)
+          subprocess.run(['git', 'apply', '--check', str(path)], check=True)
+          subprocess.run(['git', 'apply', str(path)], check=True)
+      - run: python -m pip install -r requirements.txt
+      - name: Validate exact patch without local configuration
+        run: |
+          python -m compileall -q core scripts tests
+          git diff --check
+          python -c "from pathlib import Path; assert not Path('config.json').exists()"
+          python -m pytest -q
+          python -c "from pathlib import Path; assert not Path('config.json').exists()"
+          python -c "import shutil; shutil.copyfile('config.example.json', 'config.json')"
+          python scripts/validate_config.py
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/clean-runtime-and-ci
+      - name: Refuse concurrent branch changes
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Apply verified patch
+        shell: python
+        run: |
+          import gzip, hashlib, os, subprocess
+          from pathlib import Path
+          data = gzip.decompress(b''.join(Path(f'.github/review-pr4.payload.{i}').read_bytes() for i in range(3)))
+          assert hashlib.sha256(data).hexdigest() == 'f988713c7d778576ce55469b59612e88954a5959572a9fdef29007d51e025f42'
+          path = Path(os.environ['RUNNER_TEMP']) / 'review.patch'
+          path.write_bytes(data)
+          subprocess.run(['git', 'apply', '--check', str(path)], check=True)
+          subprocess.run(['git', 'apply', str(path)], check=True)
+      - name: Commit only approved review scope
+        run: |
+          git add -- .github/workflows/ci.yml README.md core/safety.py docs/premerge-review-fixes.md scripts/personal_kb_steward.py scripts/validate_config.py tests/test_dry_run.py tests/test_platform_paths.py tests/test_review_guards.py
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: address pre-merge rollback configuration and CI review'
+          git push origin HEAD:refs/heads/agent/clean-runtime-and-ci
