@@ -144,9 +144,9 @@ python scripts\personal_kb_steward.py review approve <ID> --reason "确认无误
 
 ```bash
 python -m pip install -r requirements.txt
+python -m pytest -q  # 不预先创建本地配置
 cp config.example.json config.json
 python scripts/validate_config.py
-python -m pytest -q
 ```
 
-GitHub Actions 会在 Python 3.11 和 3.12 上执行同一套配置校验与测试。
+GitHub Actions 在 Ubuntu Python 3.11/3.12 和原生 Windows Python 3.12 上验证。先在无 config.json 的 checkout 运行完整测试，再单独校验示例配置。PR 基线变更会触发新验证，并记录实际 checkout 与两侧父提交。

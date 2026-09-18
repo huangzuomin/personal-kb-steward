@@ -6,18 +6,35 @@ on:
       - main
       - "agent/**"
   pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: "1"
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,14 +42,40 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: Verify the exact checkout and PR parents
+        shell: python
+        run: |
+          import json, os, subprocess
+          from pathlib import Path
+          event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text(encoding='utf-8'))
+          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          print('CHECKED_OUT_SHA=' + commit)
+          print('EVENT_SHA=' + os.environ['GITHUB_SHA'])
+          assert commit == os.environ['GITHUB_SHA']
+          if os.environ['GITHUB_EVENT_NAME'] == 'pull_request':
+              pr = event['pull_request']
+              parents = subprocess.check_output(['git', 'show', '-s', '--format=%P', 'HEAD'], text=True).split()
+              expected = [pr['base']['sha'], pr['head']['sha']]
+              print('BASE_HEAD_SHA=' + expected[0])
+              print('PR_HEAD_SHA=' + expected[1])
+              print('MERGE_PARENTS=' + ' '.join(parents))
+              assert parents == expected, 'Checkout is not the merge candidate for this PR event'
+
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Prepare local config
-        run: cp config.example.json config.json
+      - name: Check syntax and whitespace
+        run: |
+          python -m compileall -q core scripts tests
+          git diff --check
 
-      - name: Validate configuration
-        run: python scripts/validate_config.py
+      - name: Run full tests without local config
+        run: |
+          python -c "from pathlib import Path; assert not Path('config.json').exists()"
+          python -m pytest -q
+          python -c "from pathlib import Path; assert not Path('config.json').exists()"
 
-      - name: Run tests
-        run: python -m pytest -q
+      - name: Validate example configuration separately
+        run: |
+          python -c "import shutil; shutil.copyfile('config.example.json', 'config.json')"
+          python scripts/validate_config.py

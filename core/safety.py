@@ -82,7 +82,7 @@ def safe_write_text(
 ) -> dict[str, Any]:
     backup = backup_existing_file(cfg, target, run_id=run_id, operation=operation, reason=reason)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    target.write_text(content, encoding="utf-8", newline="")
     event = {
         "operation": operation,
         "run_id": run_id,
@@ -152,3 +152,11 @@ def user_next_step(error: BaseException | str) -> str:
     if "受保护目录" in text or "不安全目标路径" in text or "越界" in text:
         return "请修改 plan 目标路径，只允许写入派生目录，不能写入 raw/quicknote/inbox 或知识库外部。"
     return "请查看 failed run manifest 和 operation-log，确认问题后重新生成 plan 或执行 rollback。"
+
+
+def require_delete_only_rollback(manifest: dict[str, Any]) -> None:
+    """Reject the entire run before any deletion when it contains an update."""
+    if any(item.get("operation") == "update" for item in manifest.get("created", [])):
+        raise SystemExit(
+            "该运行包含更新页面，不能按新建页面删除回滚；请从备份恢复，事务回滚尚未实现。"
+        )

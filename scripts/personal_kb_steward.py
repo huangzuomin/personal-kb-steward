@@ -37,6 +37,7 @@ from core.safety import (
     backup_root,
     operation_log_path,
     recovery_hint,
+    require_delete_only_rollback,
     safe_delete_file,
     safe_write_text,
     user_next_step,
@@ -1445,10 +1446,10 @@ def resolve_run_manifest(cfg: dict[str, Any], ref: str) -> Path:
         raise SystemExit(f"找不到 run manifest：{ref}")
     raise SystemExit(f"run 引用不唯一：{ref}")
 
-
 def command_rollback(cfg: dict[str, Any], ref: str) -> int:
     manifest_path = resolve_run_manifest(cfg, ref)
     manifest = read_json(manifest_path, {})
+    require_delete_only_rollback(manifest)
     root = kb_root(cfg)
     rollback_run_id = f"rollback-{manifest.get('run_id') or run_id()}"
     cfg["_run_id"] = rollback_run_id
@@ -1501,7 +1502,6 @@ def command_rollback(cfg: dict[str, Any], ref: str) -> int:
         for item in skipped:
             print(f"- {item}")
     return 0
-
 
 def command_review(cfg: dict[str, Any], args: Any) -> int:
     target = review_queue_path(cfg)
