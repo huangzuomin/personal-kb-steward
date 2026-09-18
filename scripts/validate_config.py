@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "config.json"
 ROUTER_PATH = ROOT / "router.json"
 WORKFLOWS_PATH = ROOT / "workflows.json"
+PUBLIC_ENTRIES = frozenset({
+    "organize_kb", "discover_topics", "prepare_writing", "weave_work_memory", "healthcheck",
+})
 
 
 def read_json(path: Path) -> dict:
@@ -79,7 +82,7 @@ def main() -> int:
         expr = path_expr(cfg, key)
         if not expr:
             errors.append(f"{key} 缺失")
-        elif not str(resolve_path(expr, kb_home=str(kb))).startswith(str(ROOT)):
+        elif not resolve_path(expr, kb_home=str(kb)).is_relative_to(ROOT.resolve()):
             errors.append(f"{key} should stay under AGENT_HOME: {expr}")
     if cfg.get("safety", {}).get("default_mode") != "dry-run":
         errors.append("safety.default_mode 必须是 dry-run")
@@ -92,12 +95,21 @@ def main() -> int:
         errors.append("clustering.allow_fixed_theme_rules must be false")
 
     entries = set(workflows.get("entries", {}))
-    configured_entries = set(cfg.get("routing", {}).get("user_entries", []))
-    unknown_user_entries = configured_entries - entries
-    if unknown_user_entries:
-        errors.append(f"routing.user_entries 包含未定义 workflow：{sorted(unknown_user_entries)}")
-    if not configured_entries:
-        errors.append("routing.user_entries 不能为空")
+    user_entries = cfg.get("routing", {}).get("user_entries", [])
+    if not isinstance(user_entries, list) or not all(isinstance(item, str) for item in user_entries):
+        errors.append("routing.user_entries 必须是字符串列表")
+        user_entries = []
+    configured_entries = set(user_entries)
+    if configured_entries != PUBLIC_ENTRIES:
+        errors.append(
+            "routing.user_entries 必须恰好包含五个公共入口；"
+            f"缺失：{sorted(PUBLIC_ENTRIES - configured_entries)}；"
+            f"非公共入口：{sorted(configured_entries - PUBLIC_ENTRIES)}"
+        )
+    if len(user_entries) != len(configured_entries):
+        errors.append("routing.user_entries 不得重复")
+    if not configured_entries.issubset(entries):
+        errors.append(f"公共入口引用未定义 workflow：{sorted(configured_entries - entries)}")
 
     for route in router.get("routes", []):
         if route.get("entry") not in entries:
@@ -119,7 +131,7 @@ def main() -> int:
 
     print("配置校验通过")
     print(f"知识库：{kb.resolve() if kb.exists() else kb}")
-    print(f"用户入口：{', '.join(sorted(entries))}")
+    print(f"用户入口：{', '.join(sorted(configured_entries))}")
     print(f"knowledge_base expr: {kb_expr}")
     print(f"knowledge_base path: {kb.resolve() if kb.exists() else kb}")
     print(f"state_file path: {state}")
