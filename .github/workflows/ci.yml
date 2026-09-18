@@ -7,6 +7,9 @@ on:
       - "agent/**"
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -18,6 +21,18 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Archive tracked source for reproducibility
+        if: matrix.python-version == '3.11'
+        run: git archive --format=tar HEAD -o "$RUNNER_TEMP/steward-source.tar"
+
+      - name: Retain source snapshot
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: steward-source-${{ github.sha }}
+          path: ${{ runner.temp }}/steward-source.tar
+          retention-days: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
