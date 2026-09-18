@@ -35,7 +35,10 @@ def expand_path_expr(value: str, *, kb_home: str | None = None) -> str:
 
 
 def resolve_path(value: str, *, kb_home: str | None = None) -> Path:
-    path = Path(expand_path_expr(value, kb_home=kb_home))
+    expanded = expand_path_expr(value, kb_home=kb_home)
+    if os.sep == "/":
+        expanded = expanded.replace("\\", "/")
+    path = Path(expanded)
     if not path.is_absolute():
         path = ROOT / path
     return path.resolve()
@@ -90,8 +93,11 @@ def main() -> int:
 
     entries = set(workflows.get("entries", {}))
     configured_entries = set(cfg.get("routing", {}).get("user_entries", []))
-    if configured_entries != entries:
-        errors.append(f"routing.user_entries 与 workflows.entries 不一致：{configured_entries} != {entries}")
+    unknown_user_entries = configured_entries - entries
+    if unknown_user_entries:
+        errors.append(f"routing.user_entries 包含未定义 workflow：{sorted(unknown_user_entries)}")
+    if not configured_entries:
+        errors.append("routing.user_entries 不能为空")
 
     for route in router.get("routes", []):
         if route.get("entry") not in entries:
