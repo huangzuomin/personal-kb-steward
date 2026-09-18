@@ -14,7 +14,7 @@ import personal_kb_steward as steward  # noqa: E402
 
 class ApplyPlanTests(unittest.TestCase):
     def make_cfg(self, kb: Path) -> dict:
-        cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+        cfg = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8-sig"))
         cfg["knowledge_base"] = str(kb)
         cfg["state_file"] = str(kb / ".state.json")
         cfg["safety"]["plans_dir"] = str(kb / ".openclaw" / "plans")
