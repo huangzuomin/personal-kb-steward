@@ -65,12 +65,15 @@ Personal KB Steward 致力于解决个人知识库常见的“只存不看”、
 
 **步骤 1: 配置 LLM 密钥**
 为了启用高质量的语义分析能力，请配置你的 LLM 密钥。
-复制 `.env` 示例并填写（默认推荐 DeepSeek-V3/R1 兼容接口）：
+新建根目录 `.env`（或直接填写 `config.json` 的 `llm` 段），使用 OpenAI-compatible 接口。例如：
 
-```powershell
-cp .env.example .env
-# 编辑 .env 文件，填入你的 API 密钥
+```ini
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=你的密钥
+OPENAI_MODEL=你的模型名
 ```
+
+默认模型调用超时为 300 秒，可通过 `llm.timeout_seconds` 调整。
 👉 [详细的 LLM 配置指南](docs/llm-setup.md)
 
 ### 2. 初始化知识库路径
@@ -206,6 +209,12 @@ python scripts/kb_index.py stale
 无需新命令；先 `kb_index.py rebuild` 可启用缓存。无缓存时明确回退，不阻塞基本选材。
 计划带选材依据与过时提示，待复查材料仍须审核，输入变化会阻断旧提案落盘。
 用法与覆盖边界见 [Retrieval 接入](docs/retrieval-integration.md)。
+
+## LLM 选题卡落盘链路
+
+对 `发现选题` 使用 `--llm` 时，校验通过的 `topic-insight-miner` LLM items 会直接转换为 `planned_pages`，不再只是 `llm_runtime` 预览。目标目录始终取 `config.write.topics_dir`，模型返回的 path/filename 不参与写入路径决策；LLM 选题页 v1 一律进入人工审核。模型失败或落盘校验失败时不会静默回退写入硬编码模板页。
+
+其他 LLM Skills 暂时仍保持预览语义，等待各自的受控落盘契约。
 
 ## 研究综合写回
 

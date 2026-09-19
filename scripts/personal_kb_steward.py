@@ -30,6 +30,7 @@ from core.run_records import assert_run_can_start, save_run_manifest, record_fai
 from uuid import uuid4
 from core.plan_objects import bind_plan_objects, validate_object_writes, object_manifest_fields, reconcile_created_pages
 from core.skill_runtime import run_skill_runtime
+from core.llm_plan import integrate_topic_llm_writeback
 from core.log_manager import write_run_log
 from core.index_builder import update_index
 from core.finalizer import make_finalize_plan
@@ -835,7 +836,7 @@ def make_execution_plan(
                 action["execution_mode"] = "plan_preview"
                 action["planned_pages"] = len(planned_pages)
                 action["planned_inputs"] = len(plan_executor_result.get("inputs", []))
-        if plan_executor_result.get("issues"):
+        if plan_executor_result.get("issues") and not (use_llm and primary_skill == "topic-insight-miner"):
             manual_review.append({
                 "type": "planned_executor_issues",
                 "risk": "medium",
@@ -889,6 +890,37 @@ def make_execution_plan(
         if str(page.get("rel_path", "")).startswith("wiki/sources/") and not page_has_blocked_placeholder(page):
             page["review_required"] = False
             page["confidence"] = "high"
+    llm_result: dict[str, Any] | None = None
+    if use_llm and not scheduled:
+        input_notes = select_llm_input_notes(index, cfg, task, primary_skill, input_scope, processed_index, retriever)
+        llm_retrieval_report = retriever.history[-1] if primary_skill == "topic-insight-miner" and retriever.history else None
+        document_builder = retriever.documents if retriever.history else llm_documents
+        docs = document_builder(input_notes, int(cfg["scan"].get("max_source_chars", 6000)))
+        llm_result = run_skill_runtime(ROOT, cfg, primary_skill, task, docs, mock=mock_llm)
+        for action in actions:
+            if action.get("operation") == "run_primary_skill":
+                action.update({"execution_mode": "llm_skill_runtime", "llm_skill_path": llm_result.get("skill_path"),
+                               "llm_items": len(llm_result.get("items", [])), "llm_ok": llm_result.get("ok"),
+                               "planned_inputs": len(input_notes)})
+
+        if primary_skill == "topic-insight-miner":
+            planned_pages, writeback_issue = integrate_topic_llm_writeback(
+                cfg, planned_pages, llm_result, input_notes, llm_retrieval_report, plan_run_id,
+                lambda content, sources: validate_markdown(index, content, sources))
+            if writeback_issue:
+                manual_review.append({"type": "llm_writeback_blocked", "risk": "medium",
+                                      "reason": "LLM 返回已收到，但未通过受控落盘契约；没有回退写入模板页。",
+                                      "items": [writeback_issue]})
+            for action in actions:
+                if action.get("operation") == "run_primary_skill" and action.get("skill") == primary_skill:
+                    action.update({"planned_pages": len([p for p in planned_pages if p.get("skill") == primary_skill]),
+                                   "llm_writeback_used": bool(llm_result.get("writeback_used"))})
+
+        if llm_result.get("issues"):
+            manual_review.append({"type": "llm_runtime_issues", "risk": "medium",
+                                  "reason": "LLM Skill Runtime returned validation, provider, or writeback issues; review before apply.",
+                                  "items": llm_result.get("issues", [])[:20]})
+
     review_pages = [p for p in planned_pages if page_requires_manual_review(p)]
     if review_pages:
         manual_review.append({
@@ -897,26 +929,6 @@ def make_execution_plan(
             "reason": "plan contains review_required or low-confidence pages; approve the queue before review apply-approved.",
             "items": [p.get("rel_path") for p in review_pages[:20]],
         })
-
-    llm_result: dict[str, Any] | None = None
-    if use_llm and not scheduled:
-        input_notes = select_llm_input_notes(index, cfg, task, primary_skill, input_scope, processed_index, retriever)
-        document_builder = retriever.documents if retriever.history else llm_documents
-        docs = document_builder(input_notes, int(cfg["scan"].get("max_source_chars", 6000)))
-        llm_result = run_skill_runtime(ROOT, cfg, primary_skill, task, docs, mock=mock_llm)
-        for action in actions:
-            if action.get("operation") == "run_primary_skill":
-                action["execution_mode"] = "llm_skill_runtime"
-                action["llm_skill_path"] = llm_result.get("skill_path")
-                action["llm_items"] = len(llm_result.get("items", []))
-                action["llm_ok"] = llm_result.get("ok")
-        if llm_result.get("issues"):
-            manual_review.append({
-                "type": "llm_runtime_issues",
-                "risk": "medium",
-                "reason": "LLM Skill Runtime returned validation or provider issues; review before apply.",
-                "items": llm_result.get("issues", [])[:20],
-            })
 
     return {
         "run_id": plan_run_id,
