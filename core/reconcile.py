@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from .claims import EvidenceError, compile_claims, render_claims, validate_claims
 from .config import sha256_text
-from .knowledge_objects import ObjectIdentityError, is_knowledge_path, knowledge_root
+from .knowledge_objects import ObjectIdentityError
 from .llm import call_chat_completion
 from .markdown import frontmatter
 from .plan_objects import update_base
@@ -59,7 +59,7 @@ def _read(index: VaultIndex, rel: str) -> Note:
         raise ReconcileConflict(f"文件不存在、越界或使用了目录/文件链接：{rel}")
     if rel not in index.by_rel:
         raise ReconcileConflict(f"文件不在配置的扫描范围内：{rel}；请调整 scan.include_dirs")
-    return read_note(target, index.root)
+    return read_note(target, index.root, prefixes=index.knowledge_prefixes)
 
 
 def _resolve(index: VaultIndex, topic: str, target: str | None, topics_dir: str) -> tuple[str, Note | None]:
@@ -71,11 +71,11 @@ def _resolve(index: VaultIndex, topic: str, target: str | None, topics_dir: str)
                 raise ReconcileConflict(f"找不到对象：{target}")
             target = obj.canonical_path
         note = _read(index, target)
-        if not is_knowledge_path(note.rel) or note.metadata.get("type") != "topic-page":
-            raise ReconcileConflict("首版 reconcile 只更新带 frontmatter 的 wiki/ 主题页（type: topic-page）")
+        if not index.is_knowledge_path(note.rel) or note.metadata.get("type") != "topic-page":
+            raise ReconcileConflict("首版 reconcile 只更新配置目录内带 frontmatter 的主题页（type: topic-page）")
         return note.rel, note
     matches = [n for n in index.by_rel.values()
-               if is_knowledge_path(n.rel) and _title(n.title) == _title(topic)]
+               if index.is_knowledge_path(n.rel) and _title(n.title) == _title(topic)]
     if len(matches) > 1:
         raise ReconcileConflict("同名知识页不唯一，请用 --target 指定路径或 ID：" + ", ".join(n.rel for n in matches))
     if matches:
@@ -84,9 +84,9 @@ def _resolve(index: VaultIndex, topic: str, target: str | None, topics_dir: str)
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f\[\]#]', "-", topic).strip(" .-")[:70]
     name = re.sub(r"\s+", "-", name) or "topic"
     rel = f"{topics_dir}/topic-{name}.md"
-    if (not is_knowledge_path(rel) or "\\" in rel or ".." in PurePosixPath(rel).parts
+    if (not index.is_knowledge_path(rel) or "\\" in rel or ".." in PurePosixPath(rel).parts
             or PurePosixPath(rel).as_posix() != rel):
-        raise ReconcileConflict(f"write.topics_dir 必须是知识库子目录（当前根：{knowledge_root()}/）")
+        raise ReconcileConflict("write.topics_dir 必须是配置的规范知识库子目录")
     if (index.root / rel).exists():
         raise ReconcileConflict(f"新主题的规范路径已被其他页面占用：{rel}；请指定 --target")
     return rel, None

@@ -27,27 +27,10 @@ INDEXED_DIR_KEYS = {
     "cases_dir": "cases",
     "materials_dir": "material-packs",
 }
-# Upstream layout, used only when config.write omits a key entirely.
-LEGACY_INDEX_DIRS = {
-    "seeds": "wiki/seeds", "topics": "wiki/topics", "concepts": "wiki/concepts",
-    "cases": "wiki/cases", "material-packs": "wiki/material-packs",
-}
-
-
 def indexed_dirs(cfg: dict[str, Any]) -> dict[str, str]:
-    """Relative dirs for the index, taken from `config.write` (never hardcoded).
-
-    A missing `write` section falls back to the upstream layout rather than
-    yielding nothing: an empty result would silently stop creating READMEs.
-    """
-    write = cfg.get("write") if isinstance(cfg, dict) else None
-    write = write if isinstance(write, dict) else {}
-    resolved: dict[str, str] = {}
-    for key, label in INDEXED_DIR_KEYS.items():
-        value = str(write.get(key) or LEGACY_INDEX_DIRS[label]).replace("\\", "/").strip("/")
-        if value:
-            resolved[label] = value
-    return resolved
+    from .layout import knowledge_dirs
+    dirs = knowledge_dirs(cfg)
+    return {label: dirs[key] for key, label in INDEXED_DIR_KEYS.items()}
 
 
 def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
@@ -88,7 +71,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
             )
 
     # 2. Build root index.md content
-    
+
     # - 最近更新 (Recent Updates): Get the 3 most recent logs
     log_path = root / "log.md"
     recent_logs = []
@@ -102,7 +85,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
                 if line.strip()
             ]
             recent_logs = lines[:3]
-            
+
     recent_updates_section = "\n".join(recent_logs) if recent_logs else "- 暂无更新记录"
 
     # - 核心入口 (Core Entrances)
@@ -121,7 +104,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
             status = note.metadata.get("status", "")
             if status == "growing":
                 active_topics.append(f"- [[{note.rel}]]")
-    
+
     # Only keep up to 10 active topics to avoid bloat
     active_topics = active_topics[:10]
     active_topics_section = "\n".join(active_topics) if active_topics else "- 暂无活跃专题"
@@ -137,7 +120,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
         for line in content.splitlines():
             if '"status": "pending"' in line or '"status":"pending"' in line:
                 pending_count += 1
-                
+
     review_section = f"- [[.openclaw/manual-review/queue.jsonl]] ({pending_count} 项待处理)"
     if pending_count > 0:
         review_section = f"- Manual review queue: {pending_count} pending item(s)"
@@ -153,7 +136,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
         if reports:
             reports.sort(key=lambda p: p.name, reverse=True)
             latest_report = reports[0]
-            
+
     health_section = f"- [[outputs/{latest_report.name.replace('.md', '')}]]" if latest_report else "- 暂无健康报告"
 
     if latest_report:
@@ -183,7 +166,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
 
 {health_section}
 """
-    
+
     root_index_path = root / "index.md"
     index_path = root_index_path
     operation = "write_root_index"

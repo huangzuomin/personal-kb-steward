@@ -232,3 +232,38 @@ python scripts/synthesize.py "大黄鱼 渠道机会" --topic "大黄鱼产业"
 [小工作区说明](integrations/obsidian/README.md) 提供首页、三视图 Base、报告占位和外层 Agent 对接 Skill。
 `python scripts/workspace_report.py` 只读输出已有依赖复查结果，不改知识页或审核队列。
 这是隔离验证的试用模板；原生 Obsidian 显示、点击与主机 Skill 触发尚未实测，不是新的运行时或自动安装器。
+
+
+## 自定义知识目录与历史库接入（PR #15 收口）
+
+`write.*` 决定派生知识的位置；扫描、对象身份、检索和 SQLite 使用同一份目录配置。
+配置的知识输出目录会自动加入扫描范围（不是整个上层目录），仍尊重 `scan.exclude_dirs` / `exclude_files`。
+不能把 raw 或运行时目录配置成知识输出。默认位置仍是 `wiki/...`，不替用户写死 `_kb-steward/...`。
+更新目录配置或排除规则后，请运行 `python scripts/kb_index.py rebuild`，旧缓存不会假装匹配新范围。
+独立 `reconcile.py` / `synthesize.py` / `kb_index.py` 与主命令使用同样的对象边界，没有全局绑定顺序。
+
+新增可选配置（`config.example.json` 均为空/关闭；本地 `config.json` 不自动覆盖）：
+
+```json
+{
+  "scan": {"exclude_files": ["0-MOC.md"], "max_total_source_chars": 22000},
+  "link_resolution": {"obsidian_compat": true},
+  "candidate_promotion": [],
+  "heuristic_topics": [],
+  "finalize_aggregation": {}
+}
+```
+
+`max_total_source_chars` 限制普通 task/plan 单次 LLM 输入的正文字符合计，不含提示词、标题与诊断字段，
+不是 token 数或总 HTTP 请求大小。`0` 保持原行为；`init-kb` 逐篇调用仍由 `max_source_chars` 限制每篇。
+兼容模式只影响已有笔记的短链接 lint 与附件查询；生成页仍要求完整规范路径，不放宽来源、审核与写入边界。
+附件只索引本库路径，不读取正文、不跟随链接，也不把运行时/排除目录里的文件当证据。
+
+未配置候选规则时，初始化不生成跨来源专题；配置规则后，只统计真正命中判别词的来源，
+达到数量门槛才生成待审核候选。finalize 的主题标题来自已有 source note 的专题标签，
+仅汇总同主题来源；材料、概念、案例仍需显式配置。此版本的自动 topic 聚合仍仅取首个高频标签。
+候选与聚合的 plan/Markdown 审核标记一致。finalize 不覆盖非自身生成或正文被人工修改的聚合页，
+此时使用 Reconcile 的受控更新；原始资料不迁移、不改状态。
+
+旧 `fix_broken_links*.py` 是带私人路径与猜测关联的一次性脚本，现已退役为无写入提示，不是通用修复入口。
+使用 `healthcheck` 查看问题，再准备明确的审核提案。真实模型语义质量、原生 Obsidian 展示效果须在本地另验。

@@ -65,10 +65,10 @@ from core.vault import (
     extract_wikilinks as extract_wikilinks_core,
     resolve_link as resolve_link_core,
 )
-from core.retrieval import (CASE_MARKERS, Retriever, annotate_pages, fallback_terms, is_source_page,
+from core.retrieval import (budget_documents as llm_documents, CASE_MARKERS, Retriever, annotate_pages, fallback_terms, is_source_page,
                             is_topic_page, knowledge_prefixes_with_inputs, retrieval_prefixes,
                             query_terms as retrieval_terms)
-from core.knowledge_objects import bind_knowledge_roots as bind_objects, knowledge_root_prefixes as knowledge_roots
+from core.knowledge_objects import knowledge_root_prefixes as knowledge_roots
 from core.state import (
     changed_notes,
     load_processed_index,
@@ -127,8 +127,6 @@ def readable_filename(title: str, fallback: str = "未命名页面") -> str:
     if cleaned.lower().startswith("seed-"):
         cleaned = cleaned[5:].strip("-")
     return cleaned[:80] or fallback
-def canonical_link_target(index: VaultIndex, target: str) -> str | None:
-    return resolve_link(index, target)
 def safe_wikilink(index: VaultIndex, target: str) -> str:
     resolved = canonical_link_target(index, target)
     if not resolved:
@@ -199,12 +197,6 @@ def query_results(index: VaultIndex, query: str, limit: int = 12, prefixes: tupl
         }
         for note in select_notes(index, query, limit=limit, prefixes=prefixes, cfg=cfg)
     ]
-def llm_documents(notes: list[Note], max_chars: int, total_budget: int = 0) -> list[dict[str, str]]:
-    share = total_budget // len(notes) if total_budget and notes else 0
-    limit = min(max_chars, share) if share else max_chars
-    return [{"path": n.rel, "title": n.title, "type": str(n.metadata.get("type") or ""),
-             "status": str(n.metadata.get("status") or ""), "stage": str(n.metadata.get("stage") or ""),
-             "content": n.body[:limit]} for n in notes]
 def executor_notes(notes: list[Note]) -> list[dict[str, Any]]:
     return [
         {
@@ -350,6 +342,9 @@ def mvp_executor_plan(
     pages = planned_pages_from_executor_result(cfg, result, plan_run_id)
     if selection:
         annotate_pages(pages, selection)
+    elif skill == "topic-research-compile":
+        for page in pages:
+            page["retrieval_source_hashes"] = {n.rel: n.sha256 for n in notes if n.rel in page.get("sources", [])}
     return {
         "skill": skill,
         "inputs": result.get("inputs", []),
@@ -408,7 +403,7 @@ def source_quality(index: VaultIndex, sources: list[str]) -> tuple[bool, list[st
     if not sources:
         issues.append("缺少来源")
     for source in sources:
-        if source.endswith("/") or source in {"raw", "raw/", "wiki", "wiki/"}:
+        if source.endswith("/") or (index.root / source).is_dir():
             issues.append(f"来源过粗：{source}")
         elif source not in index.by_rel:
             issues.append(f"来源不存在：{source}")
@@ -505,7 +500,7 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
             resolved = resolve_link(index, target)
             if not resolved:
                 broken.append({"file": note.rel, "target": target})
-            elif is_noncanonical_strict(target, resolved):
+            elif (is_noncanonical_strict(target, resolved) if index.obsidian_compat else target != resolved):
                 noncanonical_links.append({"file": note.rel, "target": target, "suggested": resolved})
         if "Manual synthesis required" in note.body or "No explicit" in note.body:
             placeholders.append(note.rel)
@@ -521,8 +516,8 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
         for target in extract_wikilinks(note.body):
             resolved = resolve_link(index, target)
             if resolved:
-                inbound[Path(resolved).stem] += 1
-    orphans = [n.rel for n in index.notes if n.rel.startswith(roots) and inbound[n.path.stem] == 0 and n.path.name != "README.md"]
+                inbound[resolved] += 1
+    orphans = [n.rel for n in index.notes if n.rel.startswith(roots) and inbound[n.rel] == 0 and n.path.name != "README.md"]
     root = index.root
     backlog = {
         "quicknote": len(list((root / "quicknote").glob("*.md"))) if (root / "quicknote").exists() else 0,
@@ -1088,8 +1083,8 @@ def command_status(cfg: dict[str, Any]) -> int:
 
 
 def command_lint(cfg: dict[str, Any], write: bool = False) -> int:
-    ensure_dirs(cfg)
     if write:
+        ensure_dirs(cfg)
         cfg["_run_id"] = run_id()
     index = build_index(cfg)
     lint = healthcheck(index, cfg)
@@ -1352,7 +1347,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
         for page, target in targets:
             cfg["_write_started"] = True
             write_observed_page(cfg, page, target, created, writer=safe_write_text,
-                                identity=object_manifest_fields(page))
+                                identity=object_manifest_fields(page, prefixes=knowledge_roots(cfg)))
 
         reconcile = reconcile_created_pages(root, created)
         if not reconcile["ok"]:
@@ -1666,7 +1661,6 @@ def main(argv: list[str]) -> int:
     sub.add_parser("processed")
     args = parser.parse_args(argv)
     cfg = config()
-    bind_objects(cfg)  # object identity follows config.write
     if args.command == "status":
         return command_status(cfg)
     if args.command == "run":

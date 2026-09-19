@@ -5,10 +5,14 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from core.layout import validate_options
 CONFIG_PATH = ROOT / "config.json"
 ROUTER_PATH = ROOT / "router.json"
 WORKFLOWS_PATH = ROOT / "workflows.json"
@@ -61,7 +65,7 @@ def main() -> int:
     router = read_json(ROUTER_PATH)
     workflows = read_json(WORKFLOWS_PATH)
 
-    errors: list[str] = []
+    errors: list[str] = validate_options(cfg)
     kb_expr = cfg.get("knowledge_base", "")
     if not kb_expr:
         errors.append("knowledge_base 缺失")

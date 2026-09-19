@@ -73,7 +73,7 @@ def build_system_prompt(spec: SkillSpec, contract: dict[str, Any] | None = None)
             lines.append(f"  - {key}: {types.get(key, 'string')}")
         optional = contract.get("optional_item_types") or {}
         if optional:
-            lines.append("- 可选字段（有内容才填，没有就省略或填空数组）：")
+            lines.append("- 可选字段（有内容才填，没有可省略；空值必须遵循字段类型）：")
             for key, kind in optional.items():
                 lines.append(f"  - {key}: {kind}")
         for rule in contract.get("type_rules", []):

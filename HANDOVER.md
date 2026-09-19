@@ -1,5 +1,17 @@
 # HANDOVER —— personal-kb-steward 本地补丁集（Patch A–K）
 
+> **上游合并复核补充**：下文保留本地交接时的观察，不作为当前实现或通用环境结论。
+> 干净 Linux/Python 3.13.5 对照：基线 `1355b1a` 为 243 passed / 2 skipped / 75 subtests；
+> 原 PR head `f829f283` 为 245 passed / 1 failed / 2 skipped / 75 subtests，失败是无配置的来源页默认目录变化。
+> 因此，文中的“五个既有失败/零回归”仅适用于原作者当时的本地配置、工具和环境，不能替代上游验收。
+> 上游已把对象目录的模块级可变状态改成每个索引/笔记独立的路径快照；独立命令不再依赖 main() 先绑定。
+> 候选规则按来源逐篇匹配，聚合不再把无关来源全部挂到首个主题；审核字段在页面与计划中保持一致。
+> 附件/短链 lint 兼容开关、示例配置、排除规则缓存失效、极小字符预算和非法模型返回均已补验。
+> `LLM_MODEL` 兼容与 `OPENAI_MODEL` 文档修正早已由 PR #13 完成，本轮不重复修改提供方或密钥。
+> 临时工具/沙箱异常的记录不是禁用安全隔离的通用建议。当前使用方式见 README 的 PR #15 收口章节；
+> 最终 SHA 和 CI 结果以本 PR 的绑定复审记录为准。
+
+
 > **给下游读者（人 / GPT）的交接文档。**
 > 目的：让上游仓库维护者能判断哪些补丁值得合并、哪些必须拒绝，以及为什么。
 >
@@ -638,7 +650,7 @@ def excluded_note(cfg: dict[str, Any], path: Path) -> bool:
 ```python
 # ❌ 错误形态
 _TOPIC_PREFIX: tuple[str, ...] = ("wiki/topics/",)
-def bind_topic_prefix(cfg): 
+def bind_topic_prefix(cfg):
     global _TOPIC_PREFIX
     _TOPIC_PREFIX = ...
 ```
