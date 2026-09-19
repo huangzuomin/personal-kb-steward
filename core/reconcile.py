@@ -126,6 +126,8 @@ def _managed(text: str, metadata: dict[str, Any]) -> tuple[tuple[int, int] | Non
         raise ReconcileConflict("资料综合状态无效，不能自动替换区块")
     if sha256_text(text[begin:end]) != state.get("section_sha256"):
         raise ReconcileConflict("资料综合区块已被人工修改，不能静默覆盖；请先处理该修改")
+    if "synthesis_request" in state:
+        _synthesis_request(state["synthesis_request"])
     return (begin, end), state
 
 
@@ -157,9 +159,23 @@ def _patch_header(text: str, fields: dict[str, Any]) -> str:
     return text[:match.start(1)] + "".join(lines) + text[match.end(1):]
 
 
+def _synthesis_request(value: dict[str, str] | None) -> dict[str, str] | None:
+    """The research question/draft is intent, never an additional evidence document."""
+    if value is None:
+        return None
+    if (not isinstance(value, dict) or set(value) != {"question", "discussion"}
+            or not isinstance(value["question"], str) or not value["question"].strip()
+            or len(value["question"]) > 2000 or any(c in value["question"] for c in "\r\n")
+            or not isinstance(value["discussion"], str) or len(value["discussion"]) > 12000):
+        raise ReconcileConflict("综合请求须含单行问题（最多2000字符）和讨论要点（最多12000字符）")
+    return {key: text.strip() for key, text in value.items()}
+
+
 def make_reconcile_plan(cfg: dict[str, Any], topic: str, sources: list[str], *,
                         target: str | None = None, plan_run_id: str,
-                        completion: Callable[..., str] | None = None) -> dict[str, Any]:
+                        completion: Callable[..., str] | None = None,
+                        synthesis_request: dict[str, str] | None = None,
+                        expected_source_hashes: dict[str, str] | None = None) -> dict[str, Any]:
     """Read snapshots, request a bounded synthesis, return a proposal, never apply."""
     plan: dict[str, Any] = {
         "run_id": plan_run_id, "entry": "organize_kb", "primary_skill": SKILL,
@@ -168,6 +184,9 @@ def make_reconcile_plan(cfg: dict[str, Any], topic: str, sources: list[str], *,
     }
     info = plan["reconcile"]
     try:
+        synthesis_request = _synthesis_request(synthesis_request)
+        if synthesis_request is not None:
+            info["synthesis_request"] = synthesis_request
         if not isinstance(topic, str) or not topic.strip() or any(c in topic for c in "\r\n"):
             raise ReconcileConflict("请提供非空的单行主题名")
         if not sources or not all(isinstance(s, str) for s in sources):
@@ -186,19 +205,26 @@ def make_reconcile_plan(cfg: dict[str, Any], topic: str, sources: list[str], *,
             raise ReconcileConflict("先前使用的来源已从 sources 中移除，请先人工确认")
         fingerprints = {n.rel: n.sha256 for n in notes}
         info["source_hashes"] = fingerprints
-        if span and old_state.get("version") == 2 and fingerprints == old_state.get("source_hashes"):
+        if expected_source_hashes is not None and fingerprints != expected_source_hashes:
+            raise ReconcileConflict("检索后来源版本或范围已变化，请重新生成综合提案")
+        same_sources = fingerprints == old_state.get("source_hashes")
+        same_request = synthesis_request is None or synthesis_request == old_state.get("synthesis_request")
+        if span and old_state.get("version") == 2 and same_sources and same_request:
             validate_reconcile_page(index, {"content": original, "sources": paths,
                                            "source_sha256": fingerprints, "review_required": True,
-                                           "reconcile_version": 2})
+                                           "reconcile_version": 2,
+                                           "synthesis_request": old_state.get("synthesis_request")})
             info.update(decision="noop", reason="这些来源版本已纳入该主题，综合区块未变化")
             return plan
         documents = [{"path": n.rel, "sha256": n.sha256, "content": _text(n)} for n in notes]
         limit = int(cfg.get("reconcile", {}).get("max_context_chars", 60000))
-        if len(original) + sum(len(d["content"]) for d in documents) > limit:
+        request_size = len(json.dumps(synthesis_request, ensure_ascii=False)) if synthesis_request else 0
+        if len(original) + sum(len(d["content"]) for d in documents) + request_size > limit:
             raise ReconcileConflict(f"完整上下文超过 {limit} 字符，请先提炼来源笔记或减少资料；不静默截断")
         response = (completion or call_chat_completion)(cfg, _PROMPT, {
             "topic": existing.title if existing else topic.strip(), "target_exists": existing is not None,
             "current_page": original, "sources": documents,
+            **({"synthesis_request": synthesis_request} if synthesis_request is not None else {}),
         })
         data = json.loads(response)
         if (not isinstance(data, dict) or not isinstance(data.get("decision"), str)
@@ -220,6 +246,10 @@ def make_reconcile_plan(cfg: dict[str, Any], topic: str, sources: list[str], *,
         expected = "update" if existing else "create"
         if decision != expected:
             raise ReconcileConflict(f"模型动作 {decision} 与目标状态不符，需要 {expected}")
+        if (synthesis_request is not None and same_sources
+                and [c.to_dict() for c in claims] == old_state.get("claims")):
+            info.update(decision="noop", reason="综合判断及其证据没有变化，不为新问题单独增加页面版本")
+            return plan
         summary = render_claims(claims)
         if len(summary) > limit:
             raise ReconcileConflict("判断与证据的总展示内容过长，请缩小专题范围")
@@ -228,6 +258,8 @@ def make_reconcile_plan(cfg: dict[str, Any], topic: str, sources: list[str], *,
         section = newline.join([START, "## 资料综合", "", summary, END])
         state = {"version": 2, "claims": [c.to_dict() for c in claims],
                  "source_hashes": fingerprints, "section_sha256": sha256_text(section)}
+        if synthesis_request is not None:
+            state["synthesis_request"] = synthesis_request
         if existing:
             updated = original[:span[0]] + section + original[span[1]:] if span else original + newline * 2 + section + newline
             content = _patch_header(updated, {"sources": paths, "updated": dt.date.today().isoformat(), "reconcile_state": state})
@@ -239,7 +271,8 @@ def make_reconcile_plan(cfg: dict[str, Any], topic: str, sources: list[str], *,
         plan["planned_pages"] = [{**(update_base(existing) if existing else {}),
             "skill": SKILL, "reconcile_version": 2, "operation": expected, "rel_path": rel, "target": rel,
             "sources": paths, "source_sha256": fingerprints, "content": content, "content_sha256": sha256_text(content),
-            "review_required": True, "confidence": "medium"}]
+            "review_required": True, "confidence": "medium",
+            **({"synthesis_request": synthesis_request} if synthesis_request is not None else {})}]
         plan["manual_review"] = [{"type": "reconcile_proposal", "risk": "P1", "reason": reason,
                                    "sources": paths, "target": rel}]
         return plan
@@ -273,6 +306,8 @@ def validate_reconcile_plan(index: VaultIndex, plan: dict[str, Any]) -> None:
         raise ReconcileConflict("计划与页面来源快照不一致")
     if page.get("reconcile_version", 1) != info["version"]:
         raise ReconcileConflict("reconcile 计划与页面版本不一致")
+    if info.get("synthesis_request") != page.get("synthesis_request"):
+        raise ReconcileConflict("综合问题与页面提案不一致")
     validate_reconcile_page(index, page)
 
 
@@ -286,6 +321,9 @@ def validate_reconcile_page(index: VaultIndex, page: dict[str, Any]) -> None:
     span, state = _managed(page["content"], meta)
     if not span or state.get("source_hashes") != hashes:
         raise ReconcileConflict("reconcile 内容与来源快照不一致")
+    if (_synthesis_request(page.get("synthesis_request")) != state.get("synthesis_request")
+            or page.get("synthesis_request") != state.get("synthesis_request")):
+        raise ReconcileConflict("综合问题与正文记录不一致")
     documents = []
     for rel, expected in hashes.items():
         note = _read(index, rel)
