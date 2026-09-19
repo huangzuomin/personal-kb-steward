@@ -427,12 +427,20 @@ ok=True | writeback_used=True | writeback_pages=6 | issues=[] | planned_pages=6
 ### 验证
 
 ```
-knowledge_prefixes(cfg) → 10 个 _kb-steward/ 前缀，wiki/ 残留 = 0
-is_knowledge_path('_kb-steward/topics/x.md') → True
+knowledge_prefixes(cfg) → 10 个 _kb-steward/ 前缀
+is_knowledge_path('_kb-steward/topics/x.md') → True   （⚠️ 需先 bind_knowledge_roots(cfg)）
 is_knowledge_path('raw/剪藏/y.md')           → False（原料不是知识对象，正确）
 init-kb plan → _kb-steward/sources 3 + seeds 4 + topics 1，wiki/ 幽灵页 = 0
 runner 行数 1698（< 1700）✅
 ```
+
+> ⚠️ **此处原文写的是「`wiki/` 残留 = 0」—— 那是错的，已更正。**
+> 实测 `grep -rn '"wiki/' core/ scripts/ skills/ --include=*.py` 有 **10 行**：
+> 8 行是有意的无配置回退常量（`FINALIZE_DIR_FALLBACK` / `LEGACY_INDEX_DIRS` /
+> `DEFAULT_PREFIXES` / `LEGACY_KNOWLEDGE_DIRS` / `_dir_prefix()` fallback），
+> **2 行是真正的残留**（`core/validator.py:70`、`scripts/personal_kb_steward.py:411`，
+> 属「source too broad」措辞，见 `HANDOVER.md §7.3`）。
+> 详细清单与逐行判定见 `HANDOVER.md §8.4` 第 3 条。
 
 ### 🔴 一个必须记住的教训
 
@@ -624,10 +632,33 @@ LLM 面对不匹配素材时，在 `Manual Review` 主动写：
 - `test_candidate_promotion_absent_config_produces_no_pages`（initializer）
 - `test_finalize_aggregation_without_config_produces_no_demo_pages`（finalizer）
 
-### 最终状态
+### 最终状态（**已按三方实测更正，见 `HANDOVER.md §5.11`**）
 
 ```
-tests=323 failures=3 errors=0 skipped=4     （3 个失败在纯上游同样失败）
-runner 行数 1697（< 1700）
-可执行代码中的硬编语料 = 0（只剩解释性注释）
+── 测试 ──
+纯上游 1355b1a      320 tests / 5 failed / 0 errors / 0 skipped
+本补丁              323 tests / 5 failed / 0 errors / 0 skipped
+失败集合            与纯上游逐项相同 → 新增的失败 = 无 → 零回归
+                    （本补丁净增 3 个测试）
+runner 行数         1698（< 1700 硬上限；纯上游也是 1698）
+
+── 硬编语料 ──
+core/ scripts/ skills/ 内    只剩解释性注释
+另外                         上游自带的 scripts/fix_broken_links{,_v2}.py
+                             里硬编了具体库的文件名（上游 4e9dfa0 引入，
+                             不在调用链上，本补丁未动）
+
+── 路径字面量 ──
+"wiki/" 共 10 行：8 行有意的无配置回退 + 2 行已知残留（§7.3）
 ```
+
+> ⚠️ **本块原文写的是 `tests=323 failures=3 errors=0 skipped=4` 与 `runner 1697` —— 已更正。**
+>
+> 两个更正都源于**同一件事**：这些数字是在**没跑验收命令**的情况下凭印象写的。
+> - `failures=3 / skipped=4` 是在**符号链接不可用**的环境下测的：
+>   `test_review_guards` 与 `test_derived_index` 各有一个测试此时 `skipTest`。
+>   符号链接可用时它们会真跑，于是变成 `5 failed / 0 skipped`。
+>   ⇒ **判断回归只能比「失败集合」，不能比「失败个数」。**
+> - `runner 1697` 是 `a9801a9` 时的值；`11174ab` 补完 healthcheck 后是 **1698**。
+>
+> 教训见 `HANDOVER.md` 顶部的 **勘误（ERRATA）**。

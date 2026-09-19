@@ -1104,9 +1104,15 @@ git apply         pr-artifacts/local-patches.patch
 ### 8.4 验收标准
 
 ```bash
-# 1. 测试基线（3 个既有失败）
+# 1. 测试基线（**5 个既有失败，全部在纯上游同样失败**）
 python -m pytest tests/ -q --junitxml=/tmp/j.xml
-# 期望：tests=323 failures=3 errors=0 skipped=4
+# 期望：tests=323 failures=5 errors=0 skipped=0
+#
+# ⚠️ 不要用「失败个数」判断是否回归，要用「失败集合」：
+#    test_review_guards 与 test_derived_index 各有一个测试在
+#    创建不了符号链接时 skipTest（Windows 需管理员或开发者模式）。
+#    你的环境若无法建符号链接，会得到 3 failed / 4 skipped —— 那不是回归。
+#    正确做法见 §5.11：用 git worktree 建纯上游检出，两边都跑，再比集合。
 
 # 2. 硬编语料是否清除
 grep -rn "温州\|人工智能局\|瓯海\|智能眼镜" core/ scripts/ skills/ --include=*.py
