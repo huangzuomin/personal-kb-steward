@@ -1025,8 +1025,9 @@ a9801a9  fix: path authority, hardcoded demo corpus, and link-resolution parity
 11174ab  fix: make healthcheck path authority config-driven too
 ```
 
-（另有第三个提交，只改本文件 `HANDOVER.md`，不含代码 —— 合并时可只取前两个。
-  它的哈希没写在这里，因为**改这份文档就会 amend 掉它**，写死了必然过期。）
+（**末端的提交只改文档**，不含代码 —— 合并时可只取前两个。
+  文档提交的数量**不固定**（每改一次文档就是一个），所以这里不写个数也不写哈希：
+  写死了必然过期。数量以 GitHub 上的分支为准。）
 
 ```bash
 git log --oneline origin/main..origin/fix-path-authority-and-demo-corpus   # 看全部
