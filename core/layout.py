@@ -53,11 +53,19 @@ def validate_options(cfg: dict[str, Any]) -> list[str]:
     errors = []
     try:
         knowledge_dirs(cfg)
+        from .output_paths import auxiliary_layout
+        auxiliary_layout(cfg)
         for key, value in cfg.get("write", {}).items():
             if key.endswith("_dir"):
                 relative_dir(value)
     except (ValueError, TypeError, AttributeError) as exc:
         errors.append(str(exc))
+    minimum = cfg.get("quality_gate", {}).get("min_sources_for_seed", 2)
+    if type(minimum) is not int or minimum < 1:
+        errors.append("quality_gate.min_sources_for_seed must be a positive integer")
+    title = cfg.get("write", {}).get("index_title", "个人知识库")
+    if not isinstance(title, str) or not title.strip() or any(c in title for c in "\r\n"):
+        errors.append("write.index_title must be nonempty single-line text")
     scan = cfg.get("scan", {})
     for key in ("max_total_source_chars", "max_source_chars"):
         value = scan.get(key, 0)

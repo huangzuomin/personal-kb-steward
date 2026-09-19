@@ -20,6 +20,8 @@ def frontmatter(item: dict) -> str:
         f"confidence: {item['confidence']}",
         f"review_required: {str(bool(item['review_required'])).lower()}",
         f"origin: {json.dumps(item.get('origin', {'source_paths': item['sources']}), ensure_ascii=False)}",
+        f"cluster_confidence: {item.get('cluster_confidence', 'unknown')}",
+        f"seed_terms: {json.dumps(item.get('keywords', []), ensure_ascii=False)}",
         "---",
         "",
     ])
@@ -53,6 +55,8 @@ def render(item: dict) -> str:
         + bullet(item.get("growth_directions", []), "暂不建议继续生长。")
         + "\n## 相关链接\n\n"
         + bullet_wikilinks(item.get("related", []), "暂无可解析相关链接。")
+        + "\n## 主题关键词（不是待建链接）\n\n"
+        + bullet(item.get("keywords", []), "暂无关键词。")
         + "\n## 待创建链接\n\n"
         + bullet(item.get("pending_links", []), "暂无待创建链接。")
         + "\n## 人工复核项\n\n"

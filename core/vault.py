@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .output_paths import is_auxiliary_note
 from .layout import INTERNAL_DIRS, excluded_note, knowledge_prefixes, scan_dirs
 from .config import kb_root
 from .knowledge_objects import ObjectRegistry, identity_from_metadata, is_knowledge_path
@@ -142,7 +143,7 @@ def build_index(cfg: dict[str, Any]) -> VaultIndex:
     def add(path: Path) -> None:
         rel = path.relative_to(root)
         if (path.suffix.lower() not in extensions or set(rel.parts) & excluded
-                or excluded_note(cfg, path) or path.resolve() != path or not path.is_file()):
+                or excluded_note(cfg, path) or is_auxiliary_note(cfg, rel.as_posix()) or path.resolve() != path or not path.is_file()):
             return
         if rel.as_posix() not in found:
             found[rel.as_posix()] = read_note(path, root, prefixes=prefixes)

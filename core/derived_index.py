@@ -13,6 +13,7 @@ import tempfile
 from typing import Any, Iterator
 
 from .claims import Evidence, evidence_status, normalized_text, read_claims, render_claims
+from .output_paths import auxiliary_layout, is_auxiliary_note
 from .layout import excluded_note, knowledge_prefixes, scan_dirs
 from .config import kb_root
 from .knowledge_objects import ObjectRegistry, is_knowledge_path
@@ -83,7 +84,7 @@ def cache_path(cfg: dict[str, Any]) -> Path:
 def _scope(cfg: dict[str, Any]) -> str:
     scan = cfg["scan"]
     return json.dumps({k: sorted(set(scan[k])) for k in ("include_dirs", "exclude_dirs", "extensions")}
-                      | {"log_file": cfg["write"]["log_file"], "knowledge_dirs": knowledge_prefixes(cfg),
+                      | {"auxiliary_layout": auxiliary_layout(cfg), "knowledge_dirs": knowledge_prefixes(cfg),
                          "exclude_files": sorted(cfg["scan"].get("exclude_files", []))}, ensure_ascii=False, sort_keys=True)
 
 
@@ -95,7 +96,7 @@ def _paths(cfg: dict[str, Any], warnings: list[str]) -> list[Path]:
     def allowed(path: Path) -> bool:
         return not (set(path.relative_to(root).parts) & excluded)
     def add(path: Path) -> None:
-        if path.suffix.lower() == ".md" and allowed(path) and not excluded_note(cfg, path):
+        if path.suffix.lower() == ".md" and allowed(path) and not excluded_note(cfg, path) and not is_auxiliary_note(cfg, path.relative_to(root).as_posix()):
             try:
                 _path(root, path.relative_to(root).as_posix())
             except DerivedIndexError as exc:

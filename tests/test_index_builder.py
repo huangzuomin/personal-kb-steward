@@ -50,7 +50,7 @@ class IndexBuilderTests(unittest.TestCase):
 
             update_index(self.make_index(kb), cfg)
 
-            text = user_index.read_text(encoding="utf-8")
+            text = (kb / "index.md").read_text(encoding="utf-8")
             self.assertIn(MANAGED_INDEX_MARKER, text)
             self.assertIn("# Personal Knowledge Base", text)
             self.assertFalse(generated_index_path(kb).exists())
@@ -80,6 +80,23 @@ class IndexBuilderTests(unittest.TestCase):
             self.assertIn("type: run-report", text)
             self.assertIn("sources: []", text)
             self.assertIn("origin:", text)
+
+
+    def test_auxiliary_writers_accept_equivalent_unresolved_vault_root(self):
+        from core.log_manager import write_run_log
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp).resolve()
+            original = b"# My handwritten index\nKeep this text."
+            (kb / "index.md").write_bytes(original)
+            # Same physical root, different spelling (e.g. Windows short names).
+            alias = kb / ".." / kb.name
+            index, cfg = self.make_index(alias), self.make_cfg(kb)
+            update_index(index, cfg)
+            paths = write_run_log(index, cfg, [{"skill": "test", "created": [], "inputs": []}], "test")
+            self.assertEqual((kb / "index.md").read_bytes(), original)
+            self.assertTrue(generated_index_path(kb).exists())
+            self.assertTrue(paths)
+            self.assertTrue(all((kb / rel).exists() for rel in paths))
 
 
 if __name__ == "__main__":
