@@ -5,9 +5,40 @@
 >
 > - 上游仓库：https://github.com/huangzuomin/personal-kb-steward
 > - **基线 commit：`1355b1abcee341f73fadd0297285a7d1602ab3f5`**（"Fix Obsidian related-link validation for LLM topic cards"）
-> - 改动规模：15 文件，**+833 / −249 行**；另新增本文档与 `LOCAL-PATCHES.md`
+> - 本分支：`fix-path-authority-and-demo-corpus`，三个提交 `a9801a9` + `11174ab` + `ec46ddf`
+> - 改动规模：**17 文件，约 +2690 / −257 行**
+>   - 其中**代码 15 文件，+857 / −257**（精确值，这才是真正的补丁）
+>   - 文档 2 文件，约 +1830（`HANDOVER.md` 1195 + `LOCAL-PATCHES.md` 633）
+>
+>   > 文档行数写「约」是因为**改这份文档本身就会改变这个数字** —— 想写成精确值，
+>   > 就得改一次、量一次、再改一次，永远差几行。代码部分是稳定的。
 > - 验证环境：Windows 11 + Python 3.13 + 真实 Obsidian 库（2188 篇 md）
-> - 测试基线：`323 tests / 3 failed / 0 errors / 4 skipped` —— 3 个失败**在纯上游同样失败**（见 §5.11）
+> - 测试基线（**三方实测，见 §5.11**）：
+>
+> | 版本 | tests | failures | errors | skipped |
+> | --- | --- | --- | --- | --- |
+> | 纯上游 `1355b1a` | 320 | **5** | 0 | 0 |
+> | 本补丁 `11174ab` | 323 | **5** | 0 | 0 |
+>
+> **失败集合逐项完全相同（`新增的失败 = 无`），零回归。**
+> 本补丁净增 3 个测试。5 个失败全部是**上游既有**问题，与补丁无关。
+
+---
+
+## 📌 勘误（ERRATA）—— 本文件早期版本的 3 处错误断言
+
+这份文档的第一版是在**没有真跑验收命令**的情况下写完的，因此写错了 3 处。
+全部已在下文修正，并在此列明，以免下游被误导：
+
+| # | 早期错误断言 | 实际情况 | 修正位置 |
+| --- | --- | --- | --- |
+| 1 | 「`wiki/` 字面量残留 = 0」 | 非 0：**10 行**，其中 8 行是有意的无配置回退、**2 行是残留** | §3.2 验证 / §7.3 |
+| 2 | 「`grep -n "wiki/" core/index_builder.py` → 无输出」 | 仍命中 `LEGACY_INDEX_DIRS`（**有意保留**） | §8.4 第 3 条 |
+| 3 | 「Patch I 的 demo 语料已全部清除」 | 当时只清了 1/6 处，**另有 5 处在别处** | §3.1.x |
+
+> **根本教训**：文档里写的每一条验收命令，**必须真去执行一遍**再定稿。
+> 「我以为我改完了」和「命令输出证明我改完了」是两回事。
+> 这与本库既有的一条铁律同源 —— *「没报错」不等于「算对了」*。
 
 ---
 
@@ -54,7 +85,7 @@
 | **D** | 渲染输出契约 | `core/skill_runtime.py`、`core/skill_loader.py` | **缺陷修复** | 低 |
 | **E** | 检索上下文总预算 | `core/retrieval.py`、`scripts/…` | **缺陷修复** | 低（默认关闭） |
 | **F** | 写入路径权威 | `skills/topic-research-compile/{renderer,executor}.py` | **缺陷修复** | 低 |
-| **G** | 读取层路径权威（**四层**） | `core/{retrieval,knowledge_objects,index_builder,finalizer,reconcile}.py`、`scripts/…` | **缺陷修复** | 低 |
+| **G** | 读取层路径权威（**四层**，含 `healthcheck` 的 6 处，见 §3.2.x） | `core/{retrieval,knowledge_objects,index_builder,finalizer,reconcile}.py`、`scripts/…` | **缺陷修复** | 低 |
 | **H** | `scan.exclude_files` | `core/vault.py` | **缺陷修复** | 低（默认空） |
 | **I** | **清除硬编 demo 语料**（3 处主体 + 3 处轻度） | `core/initializer.py`、`skills/topic-research-compile/executor.py`、`core/finalizer.py`、`core/retrieval.py`、`scripts/…` | 🔴 **P0 缺陷修复** | 低（默认空） |
 | **J** | `router.json` 触达不了 `topic-research-compile` | — | **仅记录** | 见 §4.10 |
@@ -327,14 +358,97 @@ for page in planned_pages:
 
 #### 验证
 
+以下输出是**实测**（本机 `config.json`，`write.*` 指向 `_kb-steward/`）：
+
 ```
-knowledge_prefixes(cfg) → 10 个 _kb-steward/ 前缀，wiki/ 残留 = 0
-is_knowledge_path('_kb-steward/topics/x.md') → True
-is_knowledge_path('raw/剪藏/y.md')           → False   （原料不是知识对象，正确）
+knowledge_prefixes(cfg) -> 10 个前缀，全部 _kb-steward/
+    _kb-steward/seeds/  topics/  sources/  work-memory/  evidence/
+    gaps/  claim-checks/  concepts/  cases/  material-packs/
+
+is_knowledge_path('_kb-steward/topics/x.md')
+    绑定前 → False      ← 🔴 注意：必须先 bind
+    绑定后 → True       （bind_knowledge_roots(cfg) -> ('_kb-steward',)）
+is_knowledge_path('raw/剪藏/y.md')            → False（原料不是知识对象，正确）
+knowledge_root_prefixes(cfg)                  → ('_kb-steward/',)
 is_source_page({'rel_path':'_kb-steward/sources/x.md'}, cfg) → True
 无 cfg 回退: is_source_page({'rel_path':'wiki/sources/x.md'}) → True（上游行为保持）
-grep -n "wiki/" core/index_builder.py → 无输出
+无 cfg 回退: knowledge_root_prefixes(None)    → ('wiki/',)（上游行为保持）
 ```
+
+> ⚠️ **`is_knowledge_path` 是模块态的**：它读 `_KNOWLEDGE_ROOTS`，只有
+> `bind_knowledge_roots(cfg)` 调用过才会变。`main()` 里已经调了，所以 CLI 路径没问题；
+> 但**任何绕过 `main()` 直接调用的代码/测试，拿到的都是上游 `wiki/` 行为**。
+> 这不是 bug（有意的默认值），但排查时必须先想到它 —— 我第一次自测就在这里
+> 得到 `False`，一度以为补丁没生效。
+>
+> `knowledge_root_prefixes(cfg)` 特意**不读模块态**、显式收 `cfg`，就是为了避开这个坑。
+
+#### 3.2.x 🔴 第 4 层当时只修了一半：`healthcheck` 里的 6 处（已补）
+
+**这是我写这份文档时自查发现的，不是用户报的。** 教训写在前面：
+
+> 我在 §8.4 验收标准里写了 `grep -rn "wiki/"` 的期望值。**真去跑那条命令**，
+> 才发现 `healthcheck()` / `raw_coverage_report()` 里还有 6 处
+> `note.rel.startswith("wiki/")` 是我第一轮漏掉的。
+
+后果（当时状态）：
+
+```python
+# healthcheck() —— 全部 5 个清单都会静默变空
+missing_meta          # 缺 frontmatter 的知识页
+mock_content          # 含占位内容的页
+low_confidence_active # confidence=low 却 stage=active
+orphans               # 零入链页
+raw_coverage          # raw 原料的覆盖情况
+```
+
+`config.write.*` 一旦指向别的树（本库是 `_kb-steward/`），
+这 5 项**全部返回空列表，不报错、不告警** —— 健康报告会说「没有问题」。
+这正是 Patch G 存在的理由（消除静默失败），却在最后一公里漏掉了。
+
+**修法**（`11174ab`）：新增 `knowledge_root_prefixes(cfg)`，
+与 `bind_knowledge_roots()` **共用同一份根目录推导**（抽出 `roots_from_write`），不重复实现：
+
+```python
+# core/knowledge_objects.py
+def roots_from_write(cfg) -> list[str]:
+    """Top-level dirs named by `config.write`; files (e.g. log_file) are skipped."""
+    ...
+
+def bind_knowledge_roots(cfg) -> tuple[str, ...]:
+    global _KNOWLEDGE_ROOTS
+    _KNOWLEDGE_ROOTS = tuple(roots_from_write(cfg)) or (_DEFAULT_KNOWLEDGE_ROOT,)
+    return _KNOWLEDGE_ROOTS
+
+def knowledge_root_prefixes(cfg=None) -> tuple[str, ...]:
+    return tuple(f"{r}/" for r in roots_from_write(cfg)) or (f"{_DEFAULT_KNOWLEDGE_ROOT}/",)
+```
+
+```python
+# scripts/personal_kb_steward.py
+def raw_coverage_report(index, cfg):
+    ...
+    for note in index.notes:
+        if not note.rel.startswith(knowledge_roots(cfg)):
+            continue
+
+def healthcheck(index, cfg):
+    ...
+    roots = knowledge_roots(cfg)          # 循环外算一次，用了 5 次
+    for note in index.notes:
+        if note.rel.startswith(roots) and not note.metadata: ...
+        if note.rel.startswith(roots) and note.metadata and note.path.name != "README.md": ...
+        if note.rel.startswith(roots) and any(marker in note.body for marker in BLOCKED_APPLY_MARKERS): ...
+        if note.rel.startswith(roots) and confidence == "low" and stage == "active": ...
+    orphans = [n.rel for n in index.notes if n.rel.startswith(roots) and ...]
+```
+
+**行为等价性**：上游布局下 `knowledge_root_prefixes(cfg)` = `('wiki/',)`，
+与原字面量逐字节一致；无配置时回退 `('wiki/',)`；本库为 `('_kb-steward/',)`。
+
+> **runner 行数**：这次改动净 +1 行，撞到 1700 硬上限的边缘（1697 → 1698）。
+> `raw_coverage_report` 里的 `roots` 因此**刻意内联**（该函数只被调用一次，
+> 循环体极轻），把余量留给下一个人。
 
 ---
 
@@ -650,21 +764,52 @@ cp /tmp/mine/* <原路径>/
 （`assert '大黄鱼产业有一项可核对' in ...` with `status: insufficient`）
 → **证明是既有失败，与我无关。**
 
-### 5.11 最终测试基线
+### 5.11 最终测试基线（**三方实测**）
+
+这一节我做过一次修正。**第一次写的是「3 failures / 4 skipped」——
+那是在符号链接不可用的环境下跑的，其中 2 个测试被 `skipTest` 跳过了。**
+
+后来在完整环境下重跑，那两个测试**真的执行了并失败**，于是数字变成 5 failed。
+为了确认这不是我引入的，我用 `git worktree` 建了**纯上游的干净检出**做三方对照：
+
+```bash
+git worktree add --detach ../pks-pristine 1355b1a
+cp config.json ../pks-pristine/          # config.json 在 .gitignore 内，需手动带过去
+cd ../pks-pristine && python -m pytest -q --junitxml=.pytest-upstream.xml
+```
+
+| 版本 | tests | failures | errors | skipped |
+| --- | --- | --- | --- | --- |
+| 纯上游 `1355b1a` | 320 | **5** | 0 | 0 |
+| 补丁第一提交 `a9801a9` | 323 | **5** | 0 | 0 |
+| 补丁全部 `11174ab` | 323 | **5** | 0 | 0 |
+
+用 junit XML 提取失败集合做集合运算：
 
 ```
-tests=323 failures=3 errors=0 skipped=4
+上游失败集合 == 最终失败集合   -> True
+新增的失败                    -> 无
+被消除的失败                  -> 无
 ```
 
-**3 个失败在纯上游 `1355b1a` 上同样失败**（已用 §5.10 的方法逐一验证）：
+**5 个失败全部是上游既有的**（纯上游就失败）：
 
-| 测试 | 原因 |
-| --- | --- |
-| `test_ci_committed_diff::test_shallow_clone_does_not_silently_shrink_pr_range` | `git clone file://` 在 Windows 下失败 |
-| `test_frontmatter::test_topic_research_keeps_topics_as_candidates_inside_source_note` | 上游既有的 frontmatter 行为 |
-| `test_retrieval::test_real_material_task_uses_deep_fts_hits_and_records_inputs` | LLM 返回 `status: insufficient` |
+| 测试 | 原因 | 与补丁的关系 |
+| --- | --- | --- |
+| `test_ci_committed_diff::test_shallow_clone_does_not_silently_shrink_pr_range` | `git clone file://` 在本机失败 | 无关 |
+| `test_derived_index::test_links_do_not_export_external_notes_or_redirect_cache` | 符号链接 / 路径导出行为 | 无关 |
+| `test_frontmatter::test_topic_research_keeps_topics_as_candidates_inside_source_note` | 上游既有 frontmatter 行为 | 无关 |
+| `test_retrieval::test_real_material_task_uses_deep_fts_hits_and_records_inputs` | LLM 返回 `status: insufficient` | 无关 |
+| `test_review_guards::test_symlink_escape_rejected` | 符号链接创建后未触发逃逸检测 | 无关（`core/safety.py` 本补丁未触碰） |
 
-**新增 2 个回归守卫** → 321 → **323 tests**。**零回归。**
+**本补丁净增 3 个测试**（320 → 323）。**零回归。**
+
+> ⚠️ **`skipped` 数是环境相关的**，不要拿它当基线。
+> `test_review_guards` 与 `test_derived_index` 各有一个测试在
+> **创建不了符号链接时 `skipTest`**（Windows 需管理员或开发者模式）。
+> 因此同一份代码在不同环境下会给出 `3 failed / 4 skipped` 或 `5 failed / 0 skipped`。
+> **判断回归只能比「失败集合」，不能比「失败个数」。**
+> —— 我第一次就差点被这个数字骗过去。
 
 ### 5.12 运行测试时的 Python 环境陷阱
 
@@ -692,6 +837,46 @@ warning: in the working copy of 'core/vault.py', LF will be replaced by CRLF the
 
 **已验证是良性的**：`core/vault.py` 246 行全部 CRLF，无混合行尾；diff 干净。
 提交时 git 会规范化。
+
+### 5.14 🔴🔴 编辑会「静默消失」—— 沙箱/非沙箱视图不一致（**本次最贵的坑**）
+
+**现象**：我用编辑工具改了 `core/knowledge_objects.py` 和 `scripts/personal_kb_steward.py`，
+并且**连续两条命令都验证过改动生效**（`py_compile` 通过、行数从 1697 变 1698、
+新函数 `knowledge_root_prefixes` 能 import 且返回正确值）。
+
+然后我做了个「备份 → 回退 → 对照」的实验：
+
+```bash
+mkdir -p .mywork-backup
+cp core/knowledge_objects.py .mywork-backup/          # ← 备份
+cp scripts/personal_kb_steward.py .mywork-backup/
+git checkout -- core/knowledge_objects.py scripts/personal_kb_steward.py   # ← 回退
+```
+
+**结果：备份下来的根本不是我的版本。** 它 168 行、没有 `knowledge_root_prefixes`、
+与 `git show HEAD:` 只差行尾（7250 B LF → 7418 B CRLF，差 168 = 行数）。
+**我的全部改动没了。**
+
+**诊断过程**（值得抄的排查手法）：
+
+1. 先用 `Write` 落一个标记文件 `fs-probe.txt`，再从**非沙箱**命令去 `cat` 它 —— 能读到，
+   说明写入确实落在真实文件系统上，不是「写进了内存」。
+2. 于是怀疑**视图不一致**：某些命令看到的是沙箱覆盖层，另一些看到的是真实盘。
+3. **决定性动作**：重新应用改动后，**立刻用 `dangerouslyDisableSandbox: true` 的命令**
+   跑 `git diff --stat`。这次看到了 `21 insertions(+), 6 deletions(-)` —— 改动真实落盘了。
+
+**规避规则（以后一律照做）**：
+
+> ### 改完文件，必须用**非沙箱**命令验证一次 `git diff --stat`。
+> ### 跑测试/回退等危险操作**之前**，先 `git add` + `git commit`。
+
+第二句是关键：**改动一旦 commit，就再也不会被视图差异吃掉**。
+本次正是先 commit（`11174ab`）再跑全量测试，才没再丢。
+
+**连带的认知修正**：因为文件曾经静默回到 HEAD，我一度做了个**无效的 A/B 对照** ——
+「回退后测试通过 / 改动后测试失败」，看起来像是我引入了 bug，
+实际上**两边跑的都是同一个 HEAD 版本**。教训：
+**做 A/B 之前，先用 `git diff --stat` 确认 A 和 B 真的不同。**
 
 ---
 
@@ -791,11 +976,71 @@ _s0-sandbox/
 > **给上游的建议**：`init-kb` 加一个 `--only <glob>` 或 `--paths <file>`
 > 会大幅提升可用性 —— 校准批次是任何批量 LLM 任务的必备能力。
 
+### 7.3 🔴 仍有一处 `wiki` 字面量：`source too broad` 启发式（**故意留的，请一并裁决**）
+
+`grep -rn '"wiki/' core/ scripts/ skills/ --include=*.py` 现在剩下 **10 行**。
+其中 **8 行是有意保留的无配置回退常量**，**2 行是真正的残留**：
+
+| 位置 | 性质 |
+| --- | --- |
+| `core/finalizer.py:21,22` | `FINALIZE_DIR_FALLBACK` 无配置回退 ✅ 有意 |
+| `core/index_builder.py:32,33` | `LEGACY_INDEX_DIRS` 无配置回退 ✅ 有意 |
+| `core/retrieval.py:16,17` | `DEFAULT_PREFIXES` 无配置回退 ✅ 有意 |
+| `core/retrieval.py:32,33` | `LEGACY_KNOWLEDGE_DIRS` 无配置回退 ✅ 有意 |
+| `core/retrieval.py:72,76` | `_dir_prefix()` 的 fallback 参数 ✅ 有意 |
+| **`core/validator.py:70`** | 🔴 `source in {"raw", "raw/", "wiki", "wiki/"}` |
+| **`scripts/personal_kb_steward.py:411`** | 🔴 同上（`source_quality()`） |
+
+```python
+# core/validator.py:70
+if source in {"raw", "raw/", "wiki", "wiki/"} or str(source).endswith("/"):
+    issues.append(f"items[{idx}] source too broad: {source}")
+```
+
+**为什么不修**：
+
+1. 两个函数（`validate_skill_items` / `source_quality`）**签名里都没有 `cfg`**，
+   要修就得改 4 个调用点（`validate_markdown` 3 处 + `healthcheck` 1 处）并层层透传。
+2. **影响很小**：`or str(source).endswith("/")` 已经覆盖 `wiki/`、`raw/`、`_kb-steward/`；
+   漏的只是**不带斜杠的裸目录名**（如 `_kb-steward`）。而紧随其后的
+   `if source not in paths` 会照样报 `source not provided` ——
+   只是提示语从「来源过粗」变成「来源不存在」，**不会静默放过**。
+3. 属于**措辞不精确**，不属于「静默错误」。
+
+> **留给上游**：若希望彻底 config 化，建议给这两个函数加 `cfg=None` 关键字参数
+> （默认值保持上游行为），而**不是**引入模块级状态 —— 见 §3.2 的实现陷阱。
+
 ---
 
 ## 8. 给 GPT / 合并者的操作指引
 
-### 8.1 应用补丁
+### 8.1 拿到这份补丁
+
+**方式一：GitHub PR（推荐）**
+
+分支 `fix-path-authority-and-demo-corpus` 已推到上游仓库。**代码补丁是前两个提交**：
+
+```
+a9801a9  fix: path authority, hardcoded demo corpus, and link-resolution parity
+11174ab  fix: make healthcheck path authority config-driven too
+```
+
+（另有第三个提交，只改本文件 `HANDOVER.md`，不含代码 —— 合并时可只取前两个。
+  它的哈希没写在这里，因为**改这份文档就会 amend 掉它**，写死了必然过期。）
+
+```bash
+git log --oneline origin/main..origin/fix-path-authority-and-demo-corpus   # 看全部
+```
+
+```bash
+git fetch origin fix-path-authority-and-demo-corpus
+git diff origin/main...origin/fix-path-authority-and-demo-corpus   # 先看
+git merge origin/fix-path-authority-and-demo-corpus                # 再合
+```
+
+**方式二：补丁文件（离线交接）**
+
+`pr-artifacts/local-patches.patch`（约 163 KB，`git format-patch 1355b1a..HEAD` 输出）。
 
 ```bash
 git clone https://github.com/huangzuomin/personal-kb-steward.git
@@ -803,14 +1048,16 @@ cd personal-kb-steward
 git checkout 1355b1abcee341f73fadd0297285a7d1602ab3f5
 git checkout -b feature/local-patches-a-k
 
-# 方式一：用补丁文件
-git apply --check patches/local-patches.patch   # 先干跑
-git apply patches/local-patches.patch
-
-# 方式二：用 bundle（含完整提交历史）
-git fetch ../personal-kb-steward-local.bundle 'refs/heads/*:refs/remotes/local/*'
-git merge local/<branch>
+git apply --check pr-artifacts/local-patches.patch   # 先干跑，必须无输出
+git apply         pr-artifacts/local-patches.patch
 ```
+
+> **已实测**：该补丁对**纯上游 `1355b1a`** 执行 `git apply --check --verbose`，
+> 19 个文件补丁**全部通过**，退出码 0。见 §5.11 的 worktree 方法。
+
+> ⚠️ **早期版本这里写的是 `patches/local-patches.patch` —— 那个路径不存在。**
+> 真实路径是 `pr-artifacts/local-patches.patch`，且**未提交进分支**（属生成物）。
+> 若拿不到该文件，用方式一即可，二者等价。
 
 ### 8.2 合并时必须注意的 5 件事
 
@@ -864,28 +1111,48 @@ python -m pytest tests/ -q --junitxml=/tmp/j.xml
 # 2. 硬编语料是否清除
 grep -rn "温州\|人工智能局\|瓯海\|智能眼镜" core/ scripts/ skills/ --include=*.py
 # 期望：只剩解释性注释（描述这个 bug 本身），无可执行代码命中
+#   ⚠️ 但上游自带两个一次性修复脚本 scripts/fix_broken_links{,_v2}.py，
+#      里面**硬编了具体库的文件名**（温州/人工智能局…）。它们是上游代码，
+#      不是本补丁引入的，也不该由本补丁去改 —— 见下方「附带观察」。
 
-# 3. 路径字面量：只允许出现在 LEGACY 回退常量里
-grep -rn "wiki/" core/index_builder.py
-# 期望：只命中 LEGACY_INDEX_DIRS（有意保留的上游回退），无其它
+# 3. 路径字面量：逐行判性质（**不要只看条数**）
+grep -rn '"wiki/' core/ scripts/ skills/ --include=*.py
+# 期望：10 行。其中 8 行是有意的无配置回退常量，2 行是已知残留。
+#   core/finalizer.py:21,22          FINALIZE_DIR_FALLBACK   ✅ 有意
+#   core/index_builder.py:32,33      LEGACY_INDEX_DIRS       ✅ 有意
+#   core/retrieval.py:16,17          DEFAULT_PREFIXES        ✅ 有意
+#   core/retrieval.py:32,33          LEGACY_KNOWLEDGE_DIRS   ✅ 有意
+#   core/retrieval.py:72,76          _dir_prefix() fallback  ✅ 有意
+#   core/validator.py:70             🔴 残留（见 §7.3）
+#   scripts/personal_kb_steward.py:411  🔴 残留（见 §7.3）
 
 # 4. 配置缺失时的回退行为（上游兼容性）
 python -c "
 import sys; sys.path.insert(0,'.')
 from core.retrieval import knowledge_prefixes
+from core.knowledge_objects import knowledge_root_prefixes
 p = knowledge_prefixes({})
-print(len(p), p)          # 期望：7 个，全部以 wiki/ 开头
-print(knowledge_prefixes(None) == p)   # 期望：True
+print(len(p), p)                        # 期望：7 个，全部以 wiki/ 开头
+print(knowledge_prefixes(None) == p)    # 期望：True
+print(knowledge_root_prefixes(None))    # 期望：('wiki/',)
+print(knowledge_root_prefixes({}))      # 期望：('wiki/',)
 "
 
 # 5. runner 行数硬上限
 wc -l scripts/personal_kb_steward.py
-# 期望：< 1700（当前 1697）
+# 期望：< 1700（纯上游 1698 / 本补丁 1698）
 ```
 
-> **注意第 3 条**：`LEGACY_INDEX_DIRS` 里的 `wiki/...` **是故意保留的** ——
-> 它是「配置里没有 `write` 段」时的回退，保证上游行为不变。
-> 别把它当成漏改而删掉，否则 `test_index_builder` 会失败（见 §5.2）。
+> **注意第 3 条**：`LEGACY_*` / `DEFAULT_PREFIXES` / `*_FALLBACK` 里的 `wiki/...`
+> **全是故意保留的** —— 它们是「配置里没有 `write` 段」时的回退，保证上游行为不变。
+> 别把它们当成漏改而删掉，否则 `test_index_builder` 会失败（见 §5.2）。
+
+> **附带观察（给上游）**：`scripts/fix_broken_links.py` / `fix_broken_links_v2.py`
+> 是上游 `4e9dfa0` 引入的，里面**写死了某一个具体知识库的文件名**
+> （`topic-topic-from-温州市数据局（市人工智能局）…` 等）。
+> 这跟 Patch I 是**同一个反模式**：把 demo/特定库的数据固化进代码。
+> 它们是一次性修复脚本、不在库的调用链上，所以本补丁**没有动它们**；
+> 但若上游想彻底清理这个模式，这两处也值得看一眼。
 
 ---
 
@@ -893,10 +1160,21 @@ wc -l scripts/personal_kb_steward.py
 
 ```
 基线 commit                  1355b1abcee341f73fadd0297285a7d1602ab3f5
-改动规模                     15 文件，+833 / −249 行
-测试基线                     323 tests / 3 failed / 0 errors / 4 skipped
-                            3 个失败在纯上游同样失败（已逐一验证）
-runner 行数                  1697（< 1700 硬上限）
+分支                         fix-path-authority-and-demo-corpus
+提交                         a9801a9（主补丁）+ 11174ab（healthcheck 第 4 层补齐）
+                             + 第三个提交（docs，仅改本文件，哈希见 GitHub）
+                             —— 前两个哈希稳定；第三个只动文档，故不写死哈希
+改动规模                     17 文件，约 +2690 / −257 行
+  ├── 代码                   15 文件，+857 / −257（精确）
+  └── 文档                    2 文件，约 +1830（本文 1195 + LOCAL-PATCHES 633）
+
+测试基线（三方实测，见 §5.11）
+  纯上游 1355b1a             320 tests / 5 failed / 0 errors / 0 skipped
+  本补丁 11174ab             323 tests / 5 failed / 0 errors / 0 skipped
+  失败集合                   逐项相同 → 新增的失败 = 无 → 零回归
+  ⚠️ skipped 数随环境变，不能当基线；只能比「失败集合」
+
+runner 行数                  1698（纯上游 1698；< 1700 硬上限）
 
 ── Patch A/B 的效果 ──
 lint 报的断链                60 → 0（其中 52 条是假阳性）
