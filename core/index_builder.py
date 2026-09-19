@@ -37,7 +37,7 @@ def indexed_dirs(cfg: dict[str, Any]) -> dict[str, str]:
 
 def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
     """Updates managed index files without overwriting a user-owned root index.md."""
-    root = index.root
+    root = index.root.resolve()
     run_id = str(cfg.get("_run_id") or datetime.now(timezone.utc).strftime("index-%Y%m%d-%H%M%S"))
     outputs = auxiliary_paths(cfg)
     dirs = indexed_dirs(cfg)

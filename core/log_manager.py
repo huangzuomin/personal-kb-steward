@@ -21,8 +21,9 @@ def write_run_log(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[
     ts = now.strftime("%Y-%m-%d-%H%M")
     run_id = str(cfg.get("_run_id") or now.strftime("log-%Y%m%d-%H%M%S"))
 
+    root = index.root.resolve()
     outputs = auxiliary_paths(cfg)
-    logs_dir = safe_output_path(cfg, (outputs["logs_dir"] / yyyy).relative_to(index.root).as_posix())
+    logs_dir = safe_output_path(cfg, (outputs["logs_dir"] / yyyy).relative_to(root).as_posix())
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     run_log_paths = []
@@ -33,8 +34,8 @@ def write_run_log(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[
         safe_skill = re.sub(r"[^a-zA-Z0-9_-]", "-", str(skill))
         suffix = hashlib.sha256(run_id.encode()).hexdigest()[:12]
         run_log_name = f"{ts}-{safe_skill}-{suffix}-{ordinal}.md"
-        run_log_path = safe_output_path(cfg, (logs_dir / run_log_name).relative_to(index.root).as_posix())
-        rel_run_log = run_log_path.relative_to(index.root).as_posix()
+        run_log_path = safe_output_path(cfg, (logs_dir / run_log_name).relative_to(root).as_posix())
+        rel_run_log = run_log_path.relative_to(root).as_posix()
 
         status = "success" if not op.get("issues") else "has_issues"
 
@@ -81,8 +82,8 @@ def write_run_log(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[
 
     # 2. Update monthly log
     monthly_log_name = f"{yyyy_mm}.md"
-    monthly_log_path = safe_output_path(cfg, (logs_dir / monthly_log_name).relative_to(index.root).as_posix())
-    rel_monthly_log = monthly_log_path.relative_to(index.root).as_posix()
+    monthly_log_path = safe_output_path(cfg, (logs_dir / monthly_log_name).relative_to(root).as_posix())
+    rel_monthly_log = monthly_log_path.relative_to(root).as_posix()
 
     if not monthly_log_path.exists():
         safe_write_text(
