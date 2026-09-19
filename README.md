@@ -174,3 +174,16 @@ Reconcile 新提案逐条记录判断及具体原文片段，保存和应用时�
 综合正文由这些记录渲染，仍须人工审核；片段匹配不等于事实已证实。
 使用 `python scripts/claims.py <主题页路径或对象ID>` 只读查看证据状态。
 详见 [Claim + Evidence](docs/claim-evidence.md)。
+
+## 派生索引与全文检索
+
+```bash
+python scripts/kb_index.py rebuild
+python scripts/kb_index.py search "新闻智能体"
+python scripts/kb_index.py search "温州" --kind claim
+python scripts/kb_index.py show "wiki/topics/topic-新闻智能体.md"
+```
+
+只写可删除重建的 `.kb/index.sqlite`，Markdown 仍是唯一权威来源。
+中文短词、类型过滤、判断及证据查询可用；搜索结果标明构建时间和当前文件匹配状态。
+查询不会自动重建或调用模型。用法与缓存边界见 [派生索引说明](docs/derived-index.md)。
