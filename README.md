@@ -199,3 +199,10 @@ python scripts/kb_index.py stale
 只从明确的来源/证据关系追踪下游。清单指出哪些判断和主题需复查、先处理哪些上游，
 并为可更新主题提供 Reconcile 参数；不自动修改知识页或审核队列。
 首次升级须重建缓存。用法和无版本旧笔记的覆盖边界见 [依赖与过时传播](docs/dependency-stale.md)。
+
+## Agent 检索接入
+
+选题和写作材料的 `task/plan` 已使用 FTS 候选、当前文件补查和一层明确来源扩展。
+无需新命令；先 `kb_index.py rebuild` 可启用缓存。无缓存时明确回退，不阻塞基本选材。
+计划带选材依据与过时提示，待复查材料仍须审核，输入变化会阻断旧提案落盘。
+用法与覆盖边界见 [Retrieval 接入](docs/retrieval-integration.md)。

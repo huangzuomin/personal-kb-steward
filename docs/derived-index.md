@@ -1,7 +1,7 @@
 # SQLite 派生索引与基础全文检索
 
 Markdown 是唯一权威来源。索引保存于知识库 `.kb/index.sqlite`，可删除后重建。
-本功能是独立的本地检索接口，不接管 Reconcile、审核、apply 或现有 `select_notes()`。
+本功能是本地检索接口，不接管 Reconcile、审核或 apply；查询型 Agent 的接入见下文。
 不新增数据库服务、依赖、模型调用或向量检索。
 
 ## 使用
@@ -67,7 +67,9 @@ FTS 使用标题加权 BM25（数值越小越靠前），短项扫描按稳定�
 新增内容在重建前搜不到；改名或删除的旧命中会显示 unavailable。更新完成后主动 rebuild。
 知识库根目录或扫描配置改变时拒绝使用旧缓存，要求重建，避免混用其他范围的数据。
 依赖关系现由同库 dependencies 表派生，impact/stale 可只读检查影响与待更新清单，
-见 [依赖与过时传播](dependency-stale.md)。这不自动修改笔记，也没有替换 Agent 的旧检索器。
+见 [依赖与过时传播](dependency-stale.md)。这不自动修改笔记。
+Agent 查询型任务已通过 [Retriever](retrieval-integration.md) 使用缓存并补查当前文件；
+本页的独立 search/show 命令仍保持快照查询契约。
 
 索引是未加密的正文和引文副本，须按原资料保护。本仓库 `.gitignore` 排除 `.kb/`；
 独立知识库也应排除缓存的公开提交与不必要同步。不要上传个人数据库到代码仓库。
