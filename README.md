@@ -206,3 +206,14 @@ python scripts/kb_index.py stale
 无需新命令；先 `kb_index.py rebuild` 可启用缓存。无缓存时明确回退，不阻塞基本选材。
 计划带选材依据与过时提示，待复查材料仍须审核，输入变化会阻断旧提案落盘。
 用法与覆盖边界见 [Retrieval 接入](docs/retrieval-integration.md)。
+
+## 研究综合写回
+
+```bash
+python scripts/synthesize.py "大黄鱼 渠道机会" --topic "大黄鱼产业"
+```
+
+从当前资料检索并形成带逐字证据的综合提案，经原 review/apply 审核后更新同一主题，
+不把模型预览直接落盘。可用 `--discussion` 提供待核对的讨论要点；讨论本身不是证据。
+同一请求和来源未变则跳过；新问题可在同批资料上形成新判断。
+用法、上下文限制与安全边界见 [综合写回](docs/synthesis-writeback.md)。

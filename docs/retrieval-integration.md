@@ -57,3 +57,7 @@ LLM 结果仍沿用原本的预览契约，不把预览未经审核自动替换 
 仍需构建现有 VaultIndex；stale 检查也会扫描已索引的依赖来源。这轮不是消除全库扫描
 或大规模性能优化，也没有新增向量库。独立 `select_notes/query_results` 旧 helper 为兼容
 保留，但真实 query Skill 的 executor 与 LLM 输入已走 Retriever。
+
+需要把研究结果正式纳入 Wiki 时，使用 [Synthesis Writeback](synthesis-writeback.md)：
+`python scripts/synthesize.py "研究问题" --topic "稳定主题"`。
+它复用 Retriever 和 Reconcile 生成带 Claim/Evidence 的可审核提案，不改变旧 LLM 预览契约。

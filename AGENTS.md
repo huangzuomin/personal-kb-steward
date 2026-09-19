@@ -215,3 +215,10 @@ python scripts\personal_kb_steward.py processed
 依赖状态 `stale/unversioned/unchecked` 必须保留在输入与提案中，不宣称已核实。
 `retrieval_source_hashes` 由读取快照产生，保存或 apply 时不得用较新版本重绑。
 不自动建库、修复旧来源或扩展读取范围；见 `docs/retrieval-integration.md`。
+
+## 研究综合写回
+
+`core.synthesis.make_synthesis_plan` / `scripts/synthesize.py` 将问题与可选讨论转为 Reconcile 提案。
+主题与问题分开；只能引用实际来源，不把讨论草稿冒充证据。已知过时来源先更新上游。
+原 review/apply 是唯一写入通道；保留目标身份、来源版本、Claim/Evidence 与手写内容。
+无变化不写回，不用旧预览直接替换正文；见 `docs/synthesis-writeback.md`。

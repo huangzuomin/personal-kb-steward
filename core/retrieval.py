@@ -134,21 +134,7 @@ class Retriever:
                     notes.append(eligible[source])
                     selected_by[source] = "dependency"
 
-        hits = []
-        for note in notes:
-            same = self.cached.get(note.rel) == note.sha256
-            pending = self.pending.get(note.rel) if same and not self.fallback else None
-            edges = self.incoming[note.rel]
-            state = ("not_applicable" if not is_knowledge_path(note.rel) else
-                     "unchecked" if not same or self.fallback else "stale" if pending else
-                     "unversioned" if not edges or any(e["expected_sha256"] is None for e in edges) else "no_signal")
-            hit = {"path": note.rel, "sha256": note.sha256, "object_id": note.object_id, "revision": note.revision,
-                   "selected_by": selected_by[note.rel], "dependency_state": state,
-                   "cache_status": "matched" if same else "changed_or_new",
-                   "causes": pending["causes"] if pending else [],
-                   "blocked_by": pending["blocked_by"] if pending else [],
-                   "claim_ids": pending["claim_ids"] if pending else []}
-            hits.append(hit)
+        hits = self.describe(notes, selected_by=selected_by)
         require_review = any(h["dependency_state"] not in {"no_signal", "not_applicable"} for h in hits)
         require_review |= any(str(n.metadata.get("status")) in {"stale", "conflict", "manual_review"}
                               or str(n.metadata.get("review_required", "")).lower() == "true" for n in notes)
@@ -160,6 +146,26 @@ class Retriever:
         self.hits.update({h["path"]: h for h in hits})
         self.terms = terms
         return Selection(notes, report)
+
+    def describe(self, notes: list[Note], *, selected_by: dict[str, str] | None = None) -> list[dict]:
+        """Describe explicit as well as retrieved inputs using the same request snapshot."""
+        self._load()
+        hits = []
+        for note in notes:
+            same = self.cached.get(note.rel) == note.sha256
+            pending = self.pending.get(note.rel) if same and not self.fallback else None
+            edges = self.incoming[note.rel]
+            state = ("not_applicable" if not is_knowledge_path(note.rel) else
+                     "unchecked" if not same or self.fallback else "stale" if pending else
+                     "unversioned" if not edges or any(e["expected_sha256"] is None for e in edges) else "no_signal")
+            hit = {"path": note.rel, "sha256": note.sha256, "object_id": note.object_id, "revision": note.revision,
+                   "selected_by": (selected_by or {}).get(note.rel, "explicit_source"), "dependency_state": state,
+                   "cache_status": "matched" if same else "changed_or_new",
+                   "causes": pending["causes"] if pending else [],
+                   "blocked_by": pending["blocked_by"] if pending else [],
+                   "claim_ids": pending["claim_ids"] if pending else []}
+            hits.append(hit)
+        return hits
 
     def documents(self, notes: list[Note], max_chars: int) -> list[dict]:
         return [{"path": n.rel, "title": n.title, "type": str(n.metadata.get("type", "")),
