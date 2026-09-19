@@ -179,7 +179,11 @@ def object_manifest_fields(page: dict[str, Any]) -> dict[str, Any]:
     identity = identity_from_metadata(_metadata(page["content"]))
     if identity is None:
         return {}
-    return {"object_id": identity[0], "revision": identity[1], "canonical_path": page["rel_path"]}
+    result = {"object_id": identity[0], "revision": identity[1], "canonical_path": page["rel_path"]}
+    state = _metadata(page["content"]).get("reconcile_state", {})
+    if page.get("skill") == "kb-reconcile" and isinstance(state, dict) and state.get("version") == 2:
+        result["claim_ids"] = [claim["claim_id"] for claim in state["claims"]]
+    return result
 
 
 def reconcile_created_pages(root: Path, created: list[dict[str, Any]]) -> dict[str, Any]:

@@ -146,6 +146,10 @@ review_required:
 
 参阅 `docs/stable-knowledge-objects.md`。
 
+Reconcile 新提案中的判断必须带具体来源和逐字原文片段，由程序计算判断 ID、片段位置与 hash。
+`fact` 是陈述类别，不表示已核实；片段匹配、置信度和事实成立必须分开。
+查看 `docs/claim-evidence.md`；`scripts/claims.py` 只读检查证据，不自动重绑或修改旧记录。
+
 ## 用户入口
 
 普通用户只应看到 5 个高频入口：

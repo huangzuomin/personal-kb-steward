@@ -1,4 +1,4 @@
-# Reconcile Engine v1
+# Reconcile Engine
 
 Reconcile adds a source-grounded synthesis to one topic, rather than making a new
 numbered page for every run. The engine returns `create`, `update`, `conflict` or
@@ -83,9 +83,17 @@ source notes or a smaller topic, rather than silently truncating evidence.
 - Successful/partial run manifests and backups retain the existing replay guard.
   Pure create rollback works as before; update or mixed rollback stays refused.
 - The model can report conflicts or noop. Invalid decisions, missing citations and
-  unknown wikilinks yield non-writing conflict reports. Path/citation checks are
+  invalid source references yield non-writing conflict reports. Path/citation checks are
   not proof of factual accuracy; the human must verify what each source supports.
-- v1 does not introduce Claim/Evidence objects, a graph database, fuzzy entity
-  resolution, background scheduling, cross-file transactions or a new UI.
+- No graph database, fuzzy entity resolution, background scheduling, cross-file
+  transactions or new UI are introduced.
 - Tests stub external model responses, not the plan/review/apply machinery. They
   establish engineering behavior, not synthesis quality on real personal data.
+
+## Claim + Evidence extension
+
+New proposals use reconcile version 2 and require structured claims with exact
+source quotes, rather than free-form summaries with page-level links. The managed
+section displays each assertion and its evidence; machine records live in
+`reconcile_state.claims`. Existing version-1 pages/plans remain compatible. See
+[Claim + Evidence v1](claim-evidence.md) for matching rules and read-only inspection.
