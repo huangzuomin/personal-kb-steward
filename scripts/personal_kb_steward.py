@@ -34,6 +34,8 @@ from core.llm_plan import integrate_topic_llm_writeback
 from core.log_manager import write_run_log
 from core.index_builder import update_index
 from core.finalizer import make_finalize_plan
+from core.seed_updates import prepare_seed_updates
+from core.output_paths import ensure_output_dirs
 from core.initializer import make_initialization_plan as build_initialization_plan, split_existing_pages
 from core.skill_executor import execute_skill
 from core.safety import (
@@ -107,11 +109,7 @@ def stamp() -> str:
 def run_id() -> str:
     return dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
 def ensure_dirs(cfg: dict[str, Any]) -> None:
-    root = kb_root(cfg)
-    for key, rel in cfg["write"].items():
-        if key.endswith("_dir"):
-            (root / rel).mkdir(parents=True, exist_ok=True)
-    state_path(cfg).parent.mkdir(parents=True, exist_ok=True)
+    ensure_output_dirs(cfg)
 def save_state(cfg: dict[str, Any], index: VaultIndex, operations: list[dict[str, Any]]) -> None:
     save_state_core(cfg, index, operations, stamp())
 def update_processed_index(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[str, Any]]) -> None:
@@ -313,7 +311,7 @@ def mvp_executor_plan(
             if n.rel.startswith(("quicknote/", "inbox/")) or (n.rel.startswith("raw/") and raw_seed_allowed(n, cfg))
         ]
         notes = unprocessed_notes(processed_index, candidates_all, skill)[: cfg["scan"]["max_files_per_run"]]
-        context = {"config": cfg, "notes": executor_notes(notes)}
+        context = {"config": cfg, "notes": executor_notes(notes), "use_llm": use_llm}
     elif skill == "topic-research-compile":
         candidates_all = [n for n in changed if n.rel.startswith("raw/")]
         notes = unprocessed_notes(processed_index, candidates_all, skill)[: cfg["scan"]["max_files_per_run"]]
@@ -340,6 +338,9 @@ def mvp_executor_plan(
             note["retrieval"] = retriever.hits[note["rel"]]
     result = execute_skill(ROOT, skill, context)
     pages = planned_pages_from_executor_result(cfg, result, plan_run_id)
+    if skill == "mindseed-grow":
+        pages, seed_issues = prepare_seed_updates(index, cfg, pages)
+        result["issues"].extend(seed_issues)
     if selection:
         annotate_pages(pages, selection)
     elif skill == "topic-research-compile":
@@ -1165,7 +1166,7 @@ def command_init_kb(
             return 0
         blocking_review = [item for item in plan.get("manual_review", []) if item.get("type") == "planned_pages_require_review"]
         if blocking_review:
-            print("init-kb --apply 暂停：当前计划仍包含需要人工审核的页面。")
+            print("init-kb --apply 暂停：计划已保存，并未丢弃；请 review show/approve 后 review apply-approved，再继续 init-kb。")
             return 1
         command_apply_plan(cfg, str(path))
         applied_batches += 1

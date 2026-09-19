@@ -8,6 +8,8 @@ from typing import Any
 from core.markdown import frontmatter
 from core.safety import append_operation_log, safe_write_text
 from core.vault import VaultIndex
+from core.output_paths import auxiliary_paths, safe_output_path
+from core.config import review_queue_path
 
 
 MANAGED_INDEX_MARKER = "<!-- managed-by: personal-kb-steward:index-builder -->"
@@ -37,6 +39,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
     """Updates managed index files without overwriting a user-owned root index.md."""
     root = index.root
     run_id = str(cfg.get("_run_id") or datetime.now(timezone.utc).strftime("index-%Y%m%d-%H%M%S"))
+    outputs = auxiliary_paths(cfg)
     dirs = indexed_dirs(cfg)
 
     # 1. Ensure core directories have a README.md
@@ -73,7 +76,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
     # 2. Build root index.md content
 
     # - 最近更新 (Recent Updates): Get the 3 most recent logs
-    log_path = root / "log.md"
+    log_path = outputs["log_file"]
     recent_logs = []
     if log_path.exists():
         log_content = log_path.read_text(encoding="utf-8")
@@ -110,13 +113,10 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
     active_topics_section = "\n".join(active_topics) if active_topics else "- 暂无活跃专题"
 
     # - 待人工确认 (Pending Manual Review)
-    review_queue_path_str = cfg.get("safety", {}).get("manual_review_queue", "")
-    if review_queue_path_str:
-        review_queue_path_str = review_queue_path_str.replace("${AGENT_HOME}", str(Path(__file__).resolve().parents[1]))
-    review_queue_path = Path(review_queue_path_str) if review_queue_path_str else root / ".openclaw" / "manual-review" / "queue.jsonl"
+    queue_path = review_queue_path(cfg)
     pending_count = 0
-    if review_queue_path.exists():
-        content = review_queue_path.read_text(encoding="utf-8")
+    if queue_path.exists():
+        content = queue_path.read_text(encoding="utf-8")
         for line in content.splitlines():
             if '"status": "pending"' in line or '"status":"pending"' in line:
                 pending_count += 1
@@ -129,7 +129,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
 
     # - 健康状态 (Health Status)
     # Find latest lint report
-    reports_dir = root / "outputs"
+    reports_dir = outputs["reports_dir"]
     latest_report = None
     if reports_dir.exists():
         reports = list(reports_dir.glob("kb-steward-*.md"))
@@ -137,14 +137,14 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
             reports.sort(key=lambda p: p.name, reverse=True)
             latest_report = reports[0]
 
-    health_section = f"- [[outputs/{latest_report.name.replace('.md', '')}]]" if latest_report else "- 暂无健康报告"
+    health_section = f"- [[{latest_report.relative_to(root).as_posix()}]]" if latest_report else "- 暂无健康报告"
 
     if latest_report:
-        health_section = f"- [[outputs/{latest_report.name}]]"
+        health_section = f"- [[{latest_report.relative_to(root).as_posix()}]]"
 
     # Assemble index.md
     index_content = f"""{MANAGED_INDEX_MARKER}
-# Personal Knowledge Base
+# {cfg.get("write", {}).get("index_title", "Personal Knowledge Base")}
 
 ## 最近更新
 
@@ -167,18 +167,20 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
 {health_section}
 """
 
-    root_index_path = root / "index.md"
+    root_index_path = outputs["index_file"]
     index_path = root_index_path
     operation = "write_root_index"
     reason = "Update generated knowledge-base index; existing managed file is backed up first."
     if root_index_path.exists() and MANAGED_INDEX_MARKER not in root_index_path.read_text(encoding="utf-8-sig", errors="replace"):
-        index_path = generated_index_path(root)
+        index_path = safe_output_path(cfg, ".openclaw/generated-index.md")
+        if index_path.exists() and MANAGED_INDEX_MARKER not in index_path.read_text(encoding="utf-8-sig", errors="replace"):
+            raise ValueError("Generated index fallback is user-owned; refusing overwrite")
         operation = "write_generated_index"
-        reason = "Root index.md appears user-owned; write generated index to .openclaw/generated-index.md instead."
+        reason = "Configured index appears user-owned; write generated index to .openclaw/generated-index.md instead."
         append_operation_log(cfg, {
             "operation": "preserve_user_root_index",
             "run_id": run_id,
-            "target": "index.md",
+            "target": root_index_path.relative_to(root).as_posix(),
             "generated_target": ".openclaw/generated-index.md",
             "reason": reason,
         })

@@ -41,7 +41,7 @@ def split_existing_pages(cfg: dict[str, Any], pages: list[dict[str, Any]]) -> tu
     skipped: list[str] = []
     for page in pages:
         rel_path = str(page.get("rel_path") or page.get("target") or "")
-        if rel_path and page_target_exists(cfg, page):
+        if page.get("operation", "create") != "update" and rel_path and page_target_exists(cfg, page):
             skipped.append(rel_path)
         else:
             fresh.append(page)
@@ -234,8 +234,12 @@ def make_initialization_plan(
     if current_quick_batch:
         result = executor_plan_fn(
             index, cfg, "初始化知识库", "mindseed-grow",
-            current_quick_batch, processed_index, plan_run_id, use_llm=False,
+            current_quick_batch, processed_index, plan_run_id, use_llm=use_llm,
         )
+        if result and result.get("issues"):
+            manual_review.append({"type": "seed_quality_issues", "risk": "medium",
+                                  "reason": "seed 存在主题/重复问题，请核对提案；未改动原始资料。",
+                                  "items": result["issues"][:20]})
         seed_pages = result.get("planned_pages", []) if result else []
         fresh_seed_pages, skipped = split_existing_pages(cfg, seed_pages)
         planned_pages.extend(fresh_seed_pages)
@@ -324,5 +328,5 @@ def make_initialization_plan(
             "skipped_existing_pages": skipped_existing_pages,
         },
         "manual_review": manual_review,
-        "apply_instruction": "审阅 plan 后运行 apply-plan；若存在 planned_pages_require_review，则先 review approve 或重新生成。",
+        "apply_instruction": "审阅 plan 后运行 apply-plan；若存在 planned_pages_require_review，则先 review approve，再 review apply-approved；不是丢弃本批。",
     }

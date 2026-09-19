@@ -41,7 +41,10 @@
     "cases_dir": "wiki/cases",
     "reviews_dir": "wiki/project-reviews",
     "reports_dir": "outputs",
-    "log_file": "log.md"
+    "log_file": "log.md",
+    "logs_dir": "logs",
+    "index_file": "index.md",
+    "index_title": "个人知识库"
   },
   "knowledge_model": {
     "statuses": ["raw", "seed", "growing", "compiled", "linked", "stale", "conflict", "archived", "manual_review"],
@@ -58,6 +61,7 @@
     "require_canonical_wikilinks": true,
     "pending_links_section": "待创建链接",
     "min_sources_for_topic": 3,
+    "min_sources_for_seed": 2,
     "min_evidence_items_for_material_pack": 5,
     "manual_review_on_unresolved_link": true,
     "manual_review_on_low_confidence": true

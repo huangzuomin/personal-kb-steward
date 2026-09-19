@@ -267,3 +267,17 @@ python scripts/synthesize.py "大黄鱼 渠道机会" --topic "大黄鱼产业"
 
 旧 `fix_broken_links*.py` 是带私人路径与猜测关联的一次性脚本，现已退役为无写入提示，不是通用修复入口。
 使用 `healthcheck` 查看问题，再准备明确的审核提案。真实模型语义质量、原生 Obsidian 展示效果须在本地另验。
+
+## Seed 质量与索引/日志目录（Issue #16）
+
+`mindseed-grow` 不再把日记头部硬截断当成关键信号：摘取正文原句并带来源，
+空内容/单来源与聚类置信度分开处理，seed 候选继续由人审核。主题词不再冒充待建链接。
+唯一同名 seed 生成保留原文的更新提案，已消化来源版本不重复建卡；近似标题只提示复核，不自动合并。
+
+索引与日志可配置为 `write.index_file`、`write.index_title`、`write.logs_dir`、`write.log_file`；
+未配置仍用原有位置。设置 `_kb-steward/...` 后，重建 SQLite，不会在根目录新建默认索引与日志。
+完整示例及现有审核入口见 [Seed 质量与路径说明](docs/seed-quality.md)。
+
+需要审核的初始化批次不是丢弃：计划已保存，`review show` → `review approve` →
+`review apply-approved` 后再继续。不要直接修改审核标记，部分执行失败也不能靠原样重跑恢复。
+验证 `plan --llm "发现选题 ..."` 前先核对入口和可选来源；它不是 raw 全库初始化命令。

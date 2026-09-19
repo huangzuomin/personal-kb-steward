@@ -146,7 +146,7 @@ def user_next_step(error: BaseException | str) -> str:
     if isinstance(error, json.JSONDecodeError) or "JSON" in text or "Expecting" in text:
         return "请重新生成 plan 文件；当前 plan 内容不是有效 JSON，不能安全应用。"
     if any(marker in text for marker in manual_review_markers):
-        return "请先处理 manual review queue，确认内容后重新生成不需要人工审核的 plan，再执行 apply-plan。"
+        return "请在 manual review queue 中用 review show 核对本计划，review approve 后运行 review apply-approved；不要修改审核标记绕过检查。"
     if "hash" in text:
         return "请重新生成 plan；当前 plan 内容与记录的 hash 不一致。"
     if "受保护目录" in text or "不安全目标路径" in text or "越界" in text:
