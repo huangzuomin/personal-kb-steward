@@ -166,3 +166,11 @@ GitHub Actions 在 Ubuntu Python 3.11/3.12 和原生 Windows Python 3.12 上验�
 新建和更新均沿用 `review approve` / `review apply-approved`；不会直接应用。
 来源未变化则不调用模型、不重复生成页面。使用范围与来源发送说明见
 [Reconcile Engine](docs/reconcile-engine.md)。
+
+
+### 判断与原文证据
+
+Reconcile 新提案逐条记录判断及具体原文片段，保存和应用时核对位置与来源版本。
+综合正文由这些记录渲染，仍须人工审核；片段匹配不等于事实已证实。
+使用 `python scripts/claims.py <主题页路径或对象ID>` 只读查看证据状态。
+详见 [Claim + Evidence](docs/claim-evidence.md)。

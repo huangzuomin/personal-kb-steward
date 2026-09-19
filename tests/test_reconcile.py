@@ -1,5 +1,6 @@
 """Concrete reconcile regressions; only model I/O is stubbed, writes are real."""
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -24,7 +25,15 @@ def vault():
 
 
 def provider(decision="update", summary="A measured observation. [[raw/a.md]]", **kwargs):
-    return Mock(return_value=json.dumps({"decision": decision, "reason": "New evidence", "summary": summary,
+    quotes = {"raw/a.md": "An evidence record.", "raw/b.md": "A second observation."}
+    claims = []
+    for paragraph in summary.split("\n\n"):
+        sources = re.findall(r"\[\[([^]]+)\]\]", paragraph)
+        statement = re.sub(r"\[\[[^]]+\]\]", "", paragraph).strip()
+        claims.append({"statement": statement, "kind": "fact", "confidence": "medium",
+                       "evidence": [{"source": source, "quote": quotes.get(source, "Unknown source."),
+                                     "relation": "supports"} for source in sources]})
+    return Mock(return_value=json.dumps({"decision": decision, "reason": "New evidence", "claims": claims,
                                         "conflicts": [], **kwargs}))
 
 
