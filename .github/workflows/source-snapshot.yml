@@ -1,0 +1,23 @@
+name: Isolated retrieval source
+on:
+  push:
+    branches: ["transport/retrieval-source"]
+    paths: [".github/workflows/source-snapshot.yml"]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: facd92d4dc2dcfb82676873bd0f94059e54f574b
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git bundle create "$RUNNER_TEMP/steward-source.bundle" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: steward-source-facd92d4
+          path: ${{ runner.temp }}/steward-source.bundle
+          retention-days: 1
