@@ -17,6 +17,8 @@
     "extensions": [".md"],
     "max_files_per_run": 20,
     "max_source_chars": 6000,
+    "max_total_source_chars": 0,
+    "exclude_files": [],
     "raw_seed_max_chars": 2000,
     "seed_markers": ["#seed", "#随手记", "#待生长"]
   },
@@ -90,5 +92,9 @@
       "链接必须能解析，不能制造看似存在的 wikilink",
       "低置信度、断链、来源不足、分类不确定的内容进入 manual_review"
     ]
-  }
+  },
+  "candidate_promotion": [],
+  "finalize_aggregation": {},
+  "heuristic_topics": [],
+  "link_resolution": {"obsidian_compat": false}
 }

@@ -10,41 +10,14 @@ from typing import Any
 from .config import sha256_file, sha256_text
 from .dependencies import stale
 from .derived_index import DerivedIndexError, INTERNAL_DIRS, _info, _open, _path, search
-from .knowledge_objects import ObjectIdentityError, is_knowledge_path
+from .knowledge_objects import ObjectIdentityError
+from .layout import knowledge_dirs, knowledge_prefixes
 from .vault import Note, VaultIndex
 
 DEFAULT_PREFIXES = ("raw/", "quicknote/", "inbox/", "wiki/seeds/", "wiki/topics/", "wiki/sources/",
                     "wiki/evidence/", "wiki/gaps/", "wiki/claim-checks/")
 
-# --- Path authority -------------------------------------------------------
-# `config.write.*` is the single source of truth for where knowledge objects
-# live. Never hardcode a directory name again: a mismatch here means the tool
-# writes to one tree and searches another, so freshly written notes are
-# invisible and get regenerated in a loop (silent, no error).
-#
-# The keys map 1:1 onto config.write so a custom layout cannot silently break
-# retrieval. Order matters: seeds before topics keeps recall deterministic.
-KNOWLEDGE_DIR_KEYS = ("seed_dir", "topics_dir", "sources_dir", "work_memory_dir",
-                      "evidence_dir", "gaps_dir", "claims_dir", "concepts_dir",
-                      "cases_dir", "materials_dir")
 INPUT_DIRS = ("raw", "quicknote", "inbox")
-# Upstream layout, used only when no config is available (e.g. a bare import).
-LEGACY_KNOWLEDGE_DIRS = ("wiki/seeds", "wiki/topics", "wiki/sources", "wiki/work-memory",
-                         "wiki/evidence", "wiki/gaps", "wiki/claim-checks")
-
-
-def knowledge_prefixes(cfg: dict[str, Any] | None = None) -> tuple[str, ...]:
-    """Knowledge-object prefixes taken from `config.write`, not literal strings."""
-    write = cfg.get("write") if isinstance(cfg, dict) else None
-    write = write if isinstance(write, dict) else {}
-    dirs: list[str] = []
-    for key in KNOWLEDGE_DIR_KEYS:
-        value = str(write.get(key) or "").replace("\\", "/").strip("/")
-        if value:
-            dirs.append(value)
-    if not dirs:
-        dirs = list(LEGACY_KNOWLEDGE_DIRS)
-    return tuple(f"{d}/" for d in dirs)
 
 
 def retrieval_prefixes(cfg: dict[str, Any] | None = None,
@@ -62,18 +35,12 @@ def knowledge_prefixes_with_inputs(cfg: dict[str, Any] | None = None,
 # --- Page predicates ------------------------------------------------------
 # These live here, not in the runner, because the runner has a hard line cap
 # and these are pure functions over config + a page dict.
-def _dir_prefix(write: dict[str, Any], key: str, fallback: str) -> tuple[str, ...]:
-    text = str(write.get(key) or fallback).replace("\\", "/").strip("/")
-    return (f"{text}/",)
-
-
 def topic_prefixes(cfg: dict[str, Any] | None = None) -> tuple[str, ...]:
-    """Topics prefix from config; the literal is only a no-config fallback."""
-    return _dir_prefix((cfg or {}).get("write") or {}, "topics_dir", "wiki/topics")
+    return (knowledge_dirs(cfg)["topics_dir"] + "/",)
 
 
 def source_prefixes(cfg: dict[str, Any] | None = None) -> tuple[str, ...]:
-    return _dir_prefix((cfg or {}).get("write") or {}, "sources_dir", "wiki/sources")
+    return (knowledge_dirs(cfg)["sources_dir"] + "/",)
 
 
 def is_topic_page(page: dict[str, Any], cfg: dict[str, Any] | None = None) -> bool:
@@ -93,7 +60,7 @@ NOTICE = "检索不等于事实核实；旧依据需复查。内容来自当前�
 # Words that mark a fact line as a case. Kept generic on purpose: upstream also
 # listed a specific city name here, which labelled any line mentioning that city
 # as a case regardless of what it described.
-CASE_MARKERS = ("案例", "FT", "NYT", "BBC", "CBC", "项目", "实践")
+CASE_MARKERS = ("案例", "项目", "case study", "implementation")
 
 
 def fallback_terms(query: str) -> list[str]:
@@ -250,7 +217,7 @@ class Retriever:
             same = self.cached.get(note.rel) == note.sha256
             pending = self.pending.get(note.rel) if same and not self.fallback else None
             edges = self.incoming[note.rel]
-            state = ("not_applicable" if not is_knowledge_path(note.rel) else
+            state = ("not_applicable" if not note.is_knowledge else
                      "unchecked" if not same or self.fallback else "stale" if pending else
                      "unversioned" if not edges or any(e["expected_sha256"] is None for e in edges) else "no_signal")
             hit = {"path": note.rel, "sha256": note.sha256, "object_id": note.object_id, "revision": note.revision,
@@ -271,19 +238,33 @@ class Retriever:
         one long note cannot crowd out the rest, and later documents borrow whatever
         earlier ones left unused. Without a budget, behaviour is unchanged.
         """
-        share = total_budget // len(notes) if total_budget and notes else 0
-        allowance = min(max_chars, share) if share else max_chars
-        spare = 0
-        docs = []
-        for note in notes:
-            limit = min(max_chars, allowance + spare)
-            content = excerpt(note, self.terms, limit)
-            spare = max(0, allowance + spare - len(content)) if total_budget else 0
-            docs.append({"path": note.rel, "title": note.title, "type": str(note.metadata.get("type", "")),
-                         "status": str(note.metadata.get("status", "")), "stage": str(note.metadata.get("stage", "")),
-                         "content": content, "retrieval": self.hits.get(note.rel, {}),
-                         "usage_note": NOTICE})
-        return docs
+        return budget_documents(notes, max_chars, total_budget,
+                                render=lambda n, limit: {"path": n.rel, "title": n.title,
+                                    "type": str(n.metadata.get("type", "")),
+                                    "status": str(n.metadata.get("status", "")),
+                                    "stage": str(n.metadata.get("stage", "")),
+                                    "content": excerpt(n, self.terms, limit),
+                                    "retrieval": self.hits.get(n.rel, {}), "usage_note": NOTICE})
+
+
+def budget_documents(notes: list[Note], max_chars: int, total_budget: int = 0, *, render=None) -> list[dict]:
+    """Fair sequential content budget; 0 means uncapped total, never negative slicing."""
+    if type(max_chars) is not int or max_chars < 0 or type(total_budget) is not int or total_budget < 0:
+        raise ValueError("Source character budgets must be nonnegative integers")
+    remaining = total_budget
+    docs = []
+    for i, note in enumerate(notes):
+        limit = min(max_chars, remaining // (len(notes) - i)) if total_budget else max_chars
+        doc = render(note, limit) if render else {
+            "path": note.rel, "title": note.title, "type": str(note.metadata.get("type") or ""),
+            "status": str(note.metadata.get("status") or ""), "stage": str(note.metadata.get("stage") or ""),
+            "content": note.body[:limit],
+        }
+        docs.append(doc)
+        if total_budget:
+            remaining -= len(doc["content"])
+    return docs
+
 
 
 def annotate_pages(pages: list[dict], selection: Selection) -> None:

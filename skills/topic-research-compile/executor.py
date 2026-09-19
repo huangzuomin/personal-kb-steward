@@ -44,12 +44,9 @@ def sentence_chunks(text: str) -> list[str]:
 
 
 def keyword_score(sentence: str) -> int:
-    keywords = [
-        "人工智能", "AI", "政策", "规划", "产业", "应用", "数据", "算力",
-        "模型", "创新", "治理", "企业", "制造", "财政", "文化", "眼镜",
-        "示范", "平台", "目标", "亿元", "2025", "2026", "2027",
-    ]
-    return sum(2 for word in keywords if word in sentence) + min(len(sentence), 220) // 80
+    # Dates, quantities and fuller sentences are useful across domains. A private
+    # corpus's industry/year keywords must not bias every user's summaries.
+    return 2 * len(re.findall(r"\d+(?:[.,]\d+)?", sentence)) + min(len(sentence), 220) // 80
 
 
 def top_sentences(text: str, limit: int = 5) -> list[str]:
@@ -116,11 +113,9 @@ def heuristic_analysis(note: dict[str, Any], cfg: dict[str, Any] | None = None) 
 
 def target_dirs(cfg: dict[str, Any]) -> dict[str, str]:
     """Write targets must come from config.write, never from hardcoded paths."""
-    write = cfg.get("write") if isinstance(cfg, dict) else None
-    write = write if isinstance(write, dict) else {}
-    return {
-        "sources_dir": str(write.get("sources_dir") or "_kb-steward/sources").replace("\\", "/").strip("/"),
-    }
+    from core.layout import knowledge_dirs
+    return {"sources_dir": knowledge_dirs(cfg)["sources_dir"]}
+
 
 
 def execute(context: dict[str, Any]) -> dict[str, Any]:
@@ -176,11 +171,12 @@ def execute(context: dict[str, Any]) -> dict[str, Any]:
             continue
 
         cleaned = clean_body(str(note.get("body") or ""))
-        text = f"Title: {note.get('title', '')}\n\n{cleaned[:6000]}"
+        max_chars = int(cfg.get("scan", {}).get("max_source_chars", 6000))
+        text = f"Title: {note.get('title', '')}\n\n{cleaned[:max_chars]}"
         try:
             resp = call_chat_completion(cfg, system_prompt, {"text": text})
             data = json.loads(resp)
-            
+
             pages = render({
                 "source_rel": note.get("rel"),
                 "source_title": note.get("title"),

@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
+from .layout import knowledge_dirs
 from .config import kb_root, sha256_text
 from .state import changed_notes, load_processed_index, load_state, unprocessed_notes
 from .vault import Note, build_index
@@ -57,7 +58,7 @@ def make_promote_candidate_page(
     body: str,
     plan_run_id: str,
 ) -> dict[str, Any]:
-    target = (Path(cfg["write"][rel_dir_key]) / f"{readable_filename(title, kind)}.md").as_posix()
+    target = (Path(knowledge_dirs(cfg)[rel_dir_key]) / f"{readable_filename(title, kind)}.md").as_posix()
     type_by_kind = {
         "topic": "topic-page",
         "concept": "concept-page",
@@ -77,7 +78,7 @@ def make_promote_candidate_page(
         "related: []",
         f"tags: {json.dumps(['kb-initialize', kind, 'candidate'], ensure_ascii=False)}",
         "confidence: medium",
-        "review_required: false",
+        "review_required: true",
         f"origin: {json.dumps({'source_paths': sources, 'operation': 'kb-initialize', 'run_id': plan_run_id}, ensure_ascii=False)}",
         "---",
         "",
@@ -135,7 +136,6 @@ def promote_candidate_pages(cfg: dict[str, Any], notes: list[Note], plan_run_id:
     specs = candidate_promotion_specs(cfg)
     if not specs:
         return []
-    blob = "\n".join(f"{note.title}\n{note.body[:1200]}" for note in notes)
     quality = cfg.get("quality_gate", {})
     min_keys = {"topic": "min_sources_for_topic", "material-pack": "min_evidence_items_for_material_pack"}
     pages: list[dict[str, Any]] = []
@@ -144,30 +144,27 @@ def promote_candidate_pages(cfg: dict[str, Any], notes: list[Note], plan_run_id:
         if not kind or not spec.get("rel_dir_key"):
             continue
         markers = [str(m) for m in (spec.get("match_any") or []) if str(m).strip()]
-        if markers and not any(marker in blob for marker in markers):
-            continue
+        if not markers:
+            continue  # No discriminating rule is not permission to promote the whole batch.
         floor_key = min_keys.get(kind, "min_sources_for_topic")
-        floor = int(spec.get("min_sources") or quality.get(floor_key, 3))
-        if len(sources) < floor:
-            continue
-        if kind == "case" and markers:
-            scoped = [
-                note.rel for note in notes
-                if any(marker in f"{note.title}\n{note.body[:1000]}" for marker in markers)
-            ]
-        else:
-            scoped = sources
-        if not scoped:
+        floor = max(1, int(spec.get("min_sources") or quality.get(floor_key, 3)))
+        scoped = [note.rel for note in notes
+                  if any(marker.casefold() in f"{note.title}\n{note.body}".casefold() for marker in markers)]
+        scoped = scoped[:max(1, int(spec.get("max_sources") or 8))]
+        if len(scoped) < floor:
             continue
         pages.append(make_promote_candidate_page(
             cfg,
             kind=kind,
             title=str(spec["title"]),
             rel_dir_key=str(spec["rel_dir_key"]),
-            sources=scoped[: int(spec.get("max_sources") or 8)],
+            sources=scoped,
             plan_run_id=plan_run_id,
             body="\n".join(str(line) for line in (spec.get("body") or [])).strip(),
         ))
+    hashes = {note.rel: note.sha256 for note in notes}
+    for page in pages:
+        page["retrieval_source_hashes"] = {rel: hashes[rel] for rel in page["sources"]}
     fresh, _ = split_existing_pages(cfg, pages)
     return fresh
 

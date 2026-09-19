@@ -35,7 +35,7 @@ def run_skill_runtime(
         ],
         "required_item_types": {
             "title": "string（单行）",
-            "type": "string，固定 topic-card",
+            "type": "string，固定 topic-card" if skill_name == "topic-insight-miner" else "string，遵循当前 Skill 的页面类型",
             "status": "string",
             "stage": "string",
             "sources": "array<string>，必须是本次提供文档的完整相对路径",
@@ -58,7 +58,7 @@ def run_skill_runtime(
         },
         "type_rules": [
             "array<string> 字段必须返回 JSON 数组，每项一个短句；禁止把整段文字塞进数组或写成单个字符串。",
-            "没有内容的可选字段请省略或返回空数组 []，不要用字符串填空。",
+            "没有内容的可选字段请省略；数组可用 []，字符串可用空字符串，不要混用类型。",
         ],
         "forbidden": ["source", "full_article", "draft_article"],
     }
@@ -87,9 +87,10 @@ def run_skill_runtime(
             "previews": [],
         }
 
-    canonicalize_related_links(data, documents)
     issues = validate_contract(data)
-    issues.extend(validate_skill_items(data, documents))
+    if not issues:
+        canonicalize_related_links(data, documents)
+        issues.extend(validate_skill_items(data, documents))
     return {
         "enabled": True,
         "mock": mock,
@@ -97,7 +98,7 @@ def run_skill_runtime(
         "skill_path": str(spec.path),
         "ok": not issues,
         "issues": issues,
-        "items": data.get("items", []),
-        "previews": render_previews(data),
+        "items": data.get("items", []) if isinstance(data, dict) else [],
+        "previews": render_previews(data) if not issues else [],
         "raw_chars": len(raw_text),
     }

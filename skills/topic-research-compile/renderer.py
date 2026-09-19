@@ -1,6 +1,7 @@
 import re
 from typing import Any
 
+from core.layout import relative_dir
 from core.jinja_renderer import render_markdown
 
 
@@ -20,7 +21,7 @@ def short_hash(text: str) -> str:
 def render(data: dict[str, Any]) -> list[dict[str, Any]]:
     source_rel = data.get("source_rel", "")
     source_name = source_rel.split("/")[-1].replace(".md", "")
-    sources_dir = str(data.get("sources_dir") or "_kb-steward/sources").replace("\\", "/").strip("/")
+    sources_dir = relative_dir(data.get("sources_dir") or "wiki/sources")
     source_target = f"{sources_dir}/source-{slug(source_name, 'source')}-{short_hash(source_rel)}.md"
     topic_specs = [
         {**topic, "title": topic.get("title", f"Topic-{idx}")}
