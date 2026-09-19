@@ -30,21 +30,36 @@ _DEFAULT_KNOWLEDGE_ROOT = "wiki"
 _KNOWLEDGE_ROOTS: tuple[str, ...] = (_DEFAULT_KNOWLEDGE_ROOT,)
 
 
-def bind_knowledge_roots(cfg: dict[str, Any] | None) -> tuple[str, ...]:
-    """Derive the knowledge-object roots from `config.write` and cache them."""
-    global _KNOWLEDGE_ROOTS
+def roots_from_write(cfg: dict[str, Any] | None) -> list[str]:
+    """Top-level dirs named by `config.write`; files (e.g. log_file) are skipped."""
     write = cfg.get("write") if isinstance(cfg, dict) else None
-    write = write if isinstance(write, dict) else {}
     roots: list[str] = []
-    for value in write.values():
+    for value in (write if isinstance(write, dict) else {}).values():
         text = str(value or "").replace("\\", "/").strip("/")
         if not text or "." in text.split("/")[-1]:
             continue  # a file (e.g. log_file), not a directory
         head = text.split("/")[0]
         if head and head not in roots:
             roots.append(head)
-    _KNOWLEDGE_ROOTS = tuple(roots) or (_DEFAULT_KNOWLEDGE_ROOT,)
+    return roots
+
+
+def bind_knowledge_roots(cfg: dict[str, Any] | None) -> tuple[str, ...]:
+    """Derive the knowledge-object roots from `config.write` and cache them."""
+    global _KNOWLEDGE_ROOTS
+    _KNOWLEDGE_ROOTS = tuple(roots_from_write(cfg)) or (_DEFAULT_KNOWLEDGE_ROOT,)
     return _KNOWLEDGE_ROOTS
+
+
+def knowledge_root_prefixes(cfg: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """The same roots as `bind_knowledge_roots`, in prefix form (`wiki/`).
+
+    `is_knowledge_path` needs a whole path; a caller that only holds a relative
+    path has to ask the coarser question "is this note inside the knowledge tree
+    at all", which is a `startswith` against the root. Exposed separately so the
+    health report can be config-driven without touching module state.
+    """
+    return tuple(f"{r}/" for r in roots_from_write(cfg)) or (f"{_DEFAULT_KNOWLEDGE_ROOT}/",)
 
 
 def knowledge_root() -> str:

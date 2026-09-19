@@ -68,7 +68,7 @@ from core.vault import (
 from core.retrieval import (CASE_MARKERS, Retriever, annotate_pages, fallback_terms, is_source_page,
                             is_topic_page, knowledge_prefixes_with_inputs, retrieval_prefixes,
                             query_terms as retrieval_terms)
-from core.knowledge_objects import bind_knowledge_roots as bind_objects
+from core.knowledge_objects import bind_knowledge_roots as bind_objects, knowledge_root_prefixes as knowledge_roots
 from core.state import (
     changed_notes,
     load_processed_index,
@@ -437,11 +437,11 @@ def work_memory_candidate(note: Note) -> bool:
     text = note.title + "\n" + note.body[:1500]
     patterns = ["会议", "周报", "项目", "复盘", "决定", "决策", "待办", "行动项", "课程", "上课", "开会", "产品优化"]
     return any(p in text for p in patterns)
-def raw_coverage_report(index: VaultIndex) -> dict[str, Any]:
+def raw_coverage_report(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
     raw_files = sorted(note.rel for note in index.notes if note.rel.startswith("raw/"))
     coverage: dict[str, list[str]] = {rel: [] for rel in raw_files}
     for note in index.notes:
-        if not note.rel.startswith("wiki/"):
+        if not note.rel.startswith(knowledge_roots(cfg)):
             continue
         for source in note_sources(note):
             if source in coverage:
@@ -487,8 +487,9 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
     weak_topics = []
     low_confidence_active = []
     processed_schema_error = load_processed_index(cfg).get("_schema_error")
+    roots = knowledge_roots(cfg)
     for note in index.notes:
-        if note.rel.startswith("wiki/") and not note.metadata:
+        if note.rel.startswith(roots) and not note.metadata:
             missing_meta.append(note.rel)
         status = str(note.metadata.get("status", "")).strip()
         stage = str(note.metadata.get("stage", "")).strip()
@@ -497,7 +498,7 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
         elif status and status not in legal_status:
             status_issues.append({"file": note.rel, "status": status})
         sources = note_sources(note)
-        if note.rel.startswith("wiki/") and note.metadata and note.path.name != "README.md":
+        if note.rel.startswith(roots) and note.metadata and note.path.name != "README.md":
             _, issues = source_quality(index, sources)
             source_issues.extend({"file": note.rel, "issue": item} for item in issues)
         for target in extract_wikilinks(note.body):
@@ -508,12 +509,12 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
                 noncanonical_links.append({"file": note.rel, "target": target, "suggested": resolved})
         if "Manual synthesis required" in note.body or "No explicit" in note.body:
             placeholders.append(note.rel)
-        if note.rel.startswith("wiki/") and any(marker in note.body for marker in BLOCKED_APPLY_MARKERS):
+        if note.rel.startswith(roots) and any(marker in note.body for marker in BLOCKED_APPLY_MARKERS):
             mock_content.append(note.rel)
         if weak_topic_stub(note):
             weak_topics.append(note.rel)
         confidence = str(note.metadata.get("confidence", "")).strip().lower()
-        if note.rel.startswith("wiki/") and confidence == "low" and stage == "active":
+        if note.rel.startswith(roots) and confidence == "low" and stage == "active":
             low_confidence_active.append(note.rel)
     inbound = Counter()
     for note in index.notes:
@@ -521,14 +522,14 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
             resolved = resolve_link(index, target)
             if resolved:
                 inbound[Path(resolved).stem] += 1
-    orphans = [n.rel for n in index.notes if n.rel.startswith("wiki/") and inbound[n.path.stem] == 0 and n.path.name != "README.md"]
+    orphans = [n.rel for n in index.notes if n.rel.startswith(roots) and inbound[n.path.stem] == 0 and n.path.name != "README.md"]
     root = index.root
     backlog = {
         "quicknote": len(list((root / "quicknote").glob("*.md"))) if (root / "quicknote").exists() else 0,
         "inbox": len(list((root / "inbox").glob("*.md"))) if (root / "inbox").exists() else 0,
         "raw": len(list((root / "raw").glob("*.md"))) if (root / "raw").exists() else 0,
     }
-    raw_coverage = raw_coverage_report(index)
+    raw_coverage = raw_coverage_report(index, cfg)
     risk_buckets = {
         "P0": [],
         "P1": [],
