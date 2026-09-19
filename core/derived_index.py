@@ -14,11 +14,11 @@ from typing import Any, Iterator
 
 from .claims import Evidence, evidence_status, normalized_text, read_claims, render_claims
 from .config import kb_root
-from .knowledge_objects import ObjectRegistry
+from .knowledge_objects import ObjectRegistry, is_knowledge_path
 from .reconcile import END, START, _managed
 from .vault import Note, first_heading, parse_frontmatter
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 APPLICATION_ID = 0x4B425349  # KBSI: only replace our own cache.
 INTERNAL_DIRS = {".kb", ".git", ".obsidian", ".openclaw"}
 NOTICE = "索引是构建时快照；新增文件须重建后可搜。片段匹配不等于判断已证实。"
@@ -44,6 +44,12 @@ CREATE TABLE evidence (
     FOREIGN KEY(path, claim_id) REFERENCES claims(path, claim_id)
 );
 CREATE INDEX evidence_source ON evidence(source);
+CREATE TABLE dependencies (
+    source TEXT NOT NULL, dependent TEXT NOT NULL REFERENCES notes(path),
+    claim_id TEXT NOT NULL, expected_sha256 TEXT, relation TEXT NOT NULL, basis TEXT NOT NULL,
+    PRIMARY KEY(source, dependent, claim_id, relation)
+);
+CREATE INDEX dependencies_dependent ON dependencies(dependent);
 CREATE VIRTUAL TABLE search_fts USING fts5(
     item_kind UNINDEXED, path UNINDEXED, claim_id UNINDEXED, ordinal UNINDEXED,
     title, body, tokenize='trigram'
@@ -153,6 +159,38 @@ def _records(note: Note, text: str) -> list:
     return records
 
 
+def _dependency_rows(note: Note, records: list, text: str, warnings: list[str]) -> list[tuple]:
+    """Only explicit sources/evidence are dependencies; ordinary links are not."""
+    if not is_knowledge_path(note.rel):
+        return []
+    value = note.metadata.get("sources", note.metadata.get("source", []))
+    if isinstance(value, str):
+        value = [value] if value else []
+    if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
+        warnings.append(f"忽略非法 sources，依赖覆盖不完整：{note.rel}")
+        value = []
+    hashes = {}
+    if note.metadata.get("reconcile_state") is not None:
+        _, state = _managed(text, note.metadata)
+        hashes = state["source_hashes"]
+    rows = set()
+    for source in sorted(set(value) | set(hashes)):
+        path = PurePosixPath(source)
+        if (not source or "\\" in source or path.is_absolute() or ".." in path.parts
+                or path.as_posix() != source or path.suffix.lower() != ".md"
+                or any(c in source for c in "[]|#:\r\n\0")):
+            warnings.append(f"忽略非规范依赖路径：{note.rel} -> {source}")
+            continue
+        expected = hashes.get(source)
+        # Never pretend a rebuild-time hash was observed when the note was authored.
+        rows.add((source, note.rel, "", expected, "source_of",
+                  "reconcile_snapshot" if expected else "declared_source"))
+    for claim in records:
+        for e in claim.evidence:
+            rows.add((e.source, note.rel, claim.claim_id, e.source_sha256, e.relation, "evidence"))
+    return sorted(rows)
+
+
 @contextmanager
 def _open(cfg: dict[str, Any]) -> Iterator[sqlite3.Connection]:
     path = cache_path(cfg)
@@ -180,6 +218,7 @@ def _populate(conn: sqlite3.Connection, notes: list[Note], documents: dict, meta
     conn.executescript(_SCHEMA)
     with conn:
         conn.executemany("INSERT INTO metadata VALUES (?,?)", metadata.items())
+        warnings = json.loads(metadata["warnings"])
         for note in notes:
             conn.execute("INSERT INTO notes VALUES (?,?,?,?,?,?,?,?)",
                          (note.rel, note.object_id, note.revision, note.title,
@@ -187,7 +226,10 @@ def _populate(conn: sqlite3.Connection, notes: list[Note], documents: dict, meta
                           note.body, note.sha256))
             conn.execute("INSERT INTO search_fts VALUES (?,?,?,?,?,?)",
                          ("note", note.rel, None, None, note.title, note.body))
-            for claim in _records(note, documents[note.rel]["content"]):
+            records = _records(note, documents[note.rel]["content"])
+            conn.executemany("INSERT INTO dependencies VALUES (?,?,?,?,?,?)",
+                             _dependency_rows(note, records, documents[note.rel]["content"], warnings))
+            for claim in records:
                 conn.execute("INSERT INTO claims VALUES (?,?,?,?,?)",
                              (note.rel, claim.claim_id, claim.statement, claim.kind, claim.confidence))
                 conn.execute("INSERT INTO search_fts VALUES (?,?,?,?,?,?)",
@@ -198,6 +240,7 @@ def _populate(conn: sqlite3.Connection, notes: list[Note], documents: dict, meta
                                   evidence_status(evidence, documents.get(evidence.source))))
                     conn.execute("INSERT INTO search_fts VALUES (?,?,?,?,?,?)",
                                  ("evidence", note.rel, claim.claim_id, i, claim.statement, evidence.quote))
+        conn.execute("UPDATE metadata SET value=? WHERE key='warnings'", (json.dumps(warnings, ensure_ascii=False),))
 
 
 def rebuild(cfg: dict[str, Any]) -> dict:

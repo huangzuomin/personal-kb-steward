@@ -41,7 +41,7 @@ Personal KB Steward 致力于解决个人知识库常见的“只存不看”、
    ```bash
    git clone https://github.com/your-username/personal-kb-steward.git ~/.openclaw/workspace-personal-steward
    ```
-2. **安装依赖**（如果你的 Python 环境未包含）：
+2. **安装依赖**（如果你的 Python 环境未包含）**：**
    ```bash
    cd ~/.openclaw/workspace-personal-steward
    pip install -r requirements.txt
@@ -187,3 +187,15 @@ python scripts/kb_index.py show "wiki/topics/topic-新闻智能体.md"
 只写可删除重建的 `.kb/index.sqlite`，Markdown 仍是唯一权威来源。
 中文短词、类型过滤、判断及证据查询可用；搜索结果标明构建时间和当前文件匹配状态。
 查询不会自动重建或调用模型。用法与缓存边界见 [派生索引说明](docs/derived-index.md)。
+
+## 来源影响与待更新清单
+
+```bash
+python scripts/kb_index.py rebuild
+python scripts/kb_index.py impact "raw/资料.md"
+python scripts/kb_index.py stale
+```
+
+只从明确的来源/证据关系追踪下游。清单指出哪些判断和主题需复查、先处理哪些上游，
+并为可更新主题提供 Reconcile 参数；不自动修改知识页或审核队列。
+首次升级须重建缓存。用法和无版本旧笔记的覆盖边界见 [依赖与过时传播](docs/dependency-stale.md)。
