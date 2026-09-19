@@ -44,8 +44,10 @@ def note_link(root: Path, value: str) -> str:
     if (not value or path.is_absolute() or ".." in path.parts or path.as_posix() != value
             or path.suffix.lower() != ".md" or any(c in value for c in "\\[]#|<>\r\n")):
         return text(value) + "（仅路径，未链接）"
-    candidate = root / value
     try:
+        # Canonicalize the root too (notably Windows temporary-path aliases).
+        root = root.resolve()
+        candidate = root / value
         resolved = candidate.resolve()
         if (candidate.is_file() and resolved.is_relative_to(root)
                 and resolved.relative_to(root).as_posix() == value):

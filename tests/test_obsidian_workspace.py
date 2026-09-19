@@ -125,6 +125,9 @@ def test_report_escapes_untrusted_text_and_refuses_ambiguous_links(vault):
     assert '[[' not in cli.text('![[not-real.md]]')
     assert '<script>' not in cli.text('<script>not code</script>')
     assert '[[raw/a.md]]' == cli.note_link(vault.root, 'raw/a.md')
+    # Both sides of containment must use the same canonical root. Windows
+    # temp roots can use 8.3 aliases; this dot-path reproduces the mismatch on POSIX.
+    assert '[[raw/a.md]]' == cli.note_link(vault.root / 'raw' / '..', 'raw/a.md')
     assert '[[' not in cli.note_link(vault.root, '../outside.md')
     assert '[[' not in cli.note_link(vault.root, 'raw/[alias].md')
     publish(vault, 'Safe')
