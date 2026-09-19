@@ -1,22 +1,81 @@
-name: PR15 validation snapshot
+name: PR15 review verification
 on:
   push:
     branches: ["chore/pr15-validation-snapshot"]
 permissions:
   contents: read
 jobs:
-  source:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  verify:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
         with:
           ref: f829f283f74742e7c6a4b27f88176a7d79b2fd63
           fetch-depth: 0
           persist-credentials: false
-      - run: git bundle create "$RUNNER_TEMP/pr15-source.bundle" HEAD
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: pr15-source-f829f283
-          path: ${{ runner.temp }}/pr15-source.bundle
-          retention-days: 1
+          python-version: ${{ matrix.python-version }}
+      - name: Apply exact reviewed source
+        shell: python
+        run: |
+          import os, subprocess, sys
+          from pathlib import Path
+          helper = Path(os.environ['RUNNER_TEMP']) / 'apply-review.py'
+          helper.write_bytes(subprocess.check_output(['git', 'show', os.environ['GITHUB_SHA'] + ':.github/apply-pr15-review.py']))
+          subprocess.run([sys.executable, str(helper)], check=True)
+      - run: python -m pip install -r requirements.txt
+      - name: Full isolated validation
+        shell: python
+        run: |
+          import shutil, subprocess, sys
+          from pathlib import Path
+          assert not Path('config.json').exists()
+          subprocess.run([sys.executable, '-m', 'compileall', '-q', 'core', 'scripts', 'skills', 'tests'], check=True)
+          subprocess.run([sys.executable, '-m', 'pytest', '-q'], check=True)
+          assert not Path('config.json').exists()
+          try:
+              shutil.copyfile('config.example.json', 'config.json')
+              subprocess.run([sys.executable, 'scripts/validate_config.py'], check=True)
+          finally:
+              Path('config.json').unlink(missing_ok=True)
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-path-authority-and-demo-corpus
+          fetch-depth: 0
+      - name: Apply tested patch only if PR is unchanged
+        shell: python
+        run: |
+          import os, subprocess, sys
+          from pathlib import Path
+          helper = Path(os.environ['RUNNER_TEMP']) / 'apply-review.py'
+          helper.write_bytes(subprocess.check_output(['git', 'show', os.environ['GITHUB_SHA'] + ':.github/apply-pr15-review.py']))
+          subprocess.run([sys.executable, str(helper)], check=True)
+      - name: Publish reviewed files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: complete configuration authority and remove demo-driven write behavior'
+          git push origin HEAD:refs/heads/fix-path-authority-and-demo-corpus
