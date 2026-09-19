@@ -29,3 +29,6 @@ task-*.md
 tmp/
 ppt/
 *.pptx
+
+# Disposable knowledge-search cache
+.kb/
