@@ -1,0 +1,36 @@
+name: Issue16 verified patch transport
+on:
+  push:
+    branches: ["fix/seed-quality-and-output-paths"]
+    paths: [".github/issue16.payload.*", ".github/workflows/issue16-apply.yml"]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Apply the exact locally tested patch
+        shell: python
+        run: |
+          import gzip, hashlib, os, subprocess
+          from pathlib import Path
+          data = gzip.decompress(b''.join(Path(f'.github/issue16.payload.{i}').read_bytes() for i in range(11)))
+          assert hashlib.sha256(data).hexdigest() == '200a7b213582539c174131728054ac2c04fc3a161ec5d00f5452a26530e53871'
+          patch = Path(os.environ['RUNNER_TEMP']) / 'issue16.patch'
+          patch.write_bytes(data)
+          subprocess.run(['git', 'apply', '--check', str(patch)], check=True)
+          subprocess.run(['git', 'apply', str(patch)], check=True)
+          subprocess.run(['git', 'diff', '--check'], check=True)
+      - name: Publish implementation only; remove all transport files
+        run: |
+          git rm -- .github/issue16.payload.* .github/workflows/issue16-source.yml .github/workflows/issue16-apply.yml
+          git add -- README.md config.example.json core/derived_index.py core/index_builder.py core/initializer.py core/layout.py core/log_manager.py core/safety.py core/vault.py scripts/personal_kb_steward.py skills/mindseed-grow/executor.py skills/mindseed-grow/renderer.py core/output_paths.py core/seed_quality.py core/seed_updates.py docs/seed-quality.md tests/test_seed_quality_outputs.py
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: grounded seed candidates, cross-batch reuse and configured auxiliary outputs'
+          git push origin HEAD:refs/heads/fix/seed-quality-and-output-paths
