@@ -1,0 +1,60 @@
+name: Validate and publish synthesis patch
+on:
+  push:
+    branches: ["transport/synthesis-source"]
+    paths: [".github/synthesis.payload.*", ".github/workflows/publish-synthesis.yml"]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply exact verified patch to pinned base
+        shell: python
+        run: |
+          import gzip, hashlib, os, subprocess
+          from pathlib import Path
+          raw = b''.join(Path(f'.github/synthesis.payload.{i}').read_bytes() for i in range(4))
+          patch = gzip.decompress(raw)
+          if hashlib.sha256(patch).hexdigest() != '07e6004a28658306b60625df7ef5629a851c2c118899c63990ac8eea78368139':
+              raise SystemExit('Patch checksum mismatch')
+          path = Path(os.environ['RUNNER_TEMP']) / 'synthesis.patch'
+          path.write_bytes(patch)
+          subprocess.run(['git', 'checkout', '--detach', '466fed168ac441e1da3f7ae7e8ee0d70cdbd76fc'], check=True)
+          subprocess.run(['git', 'apply', '--check', str(path)], check=True)
+          subprocess.run(['git', 'apply', str(path)], check=True)
+      - run: python -m pip install -r requirements.txt
+      - name: Validate implementation without local configuration
+        shell: python
+        run: |
+          import shutil, subprocess, sys
+          from pathlib import Path
+          subprocess.run([sys.executable, '-m', 'compileall', '-q', 'core', 'scripts', 'tests'], check=True)
+          assert not Path('config.json').exists()
+          subprocess.run([sys.executable, '-m', 'pytest', '-q'], check=True)
+          assert not Path('config.json').exists()
+          shutil.copyfile('config.example.json', 'config.json')
+          subprocess.run([sys.executable, 'scripts/validate_config.py'], check=True)
+      - name: Publish only the reviewed feature tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- AGENTS.md README.md core/reconcile.py core/retrieval.py core/synthesis.py docs/retrieval-integration.md docs/synthesis-writeback.md scripts/reconcile.py scripts/synthesize.py tests/test_synthesis.py
+          git diff --cached --check
+          test "$(git write-tree)" = 'd1d6e66e8eb42df9ef5094b95c655eafd1c79b2a'
+          actual=$(git ls-remote origin refs/heads/agent/synthesis-writeback | cut -f1)
+          test "$actual" = '466fed168ac441e1da3f7ae7e8ee0d70cdbd76fc'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: add evidence-grounded synthesis writeback through reviewed reconcile'
+          git push origin HEAD:refs/heads/agent/synthesis-writeback
