@@ -7,7 +7,7 @@
     "model": "",
     "api_key_env": "OPENAI_API_KEY",
     "temperature": 0.2,
-    "timeout_seconds": 60
+    "timeout_seconds": 300
   },
   "knowledge_base": "${AGENT_HOME}\\kb-template",
   "state_file": "${AGENT_HOME}\\.openclaw\\personal-kb-steward-state.json",

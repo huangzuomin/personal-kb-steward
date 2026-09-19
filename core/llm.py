@@ -64,13 +64,13 @@ def mock_skill_response(skill: str, task: str, documents: list[dict[str, str]]) 
 def call_chat_completion(cfg: dict[str, Any], system_prompt: str, user_payload: dict[str, Any]) -> str:
     llm_cfg = cfg.get("llm", {})
     base_url = os.environ.get("OPENAI_BASE_URL") or llm_cfg.get("base_url") or "https://api.openai.com/v1"
-    model = os.environ.get("OPENAI_MODEL") or llm_cfg.get("model")
+    model = os.environ.get("OPENAI_MODEL") or os.environ.get("LLM_MODEL") or llm_cfg.get("model")
     api_key = os.environ.get("OPENAI_API_KEY")
     api_key_env = llm_cfg.get("api_key_env")
     if not api_key and api_key_env:
         api_key = os.environ.get(str(api_key_env))
     if not model:
-        raise LLMError("Missing LLM model. Set OPENAI_MODEL or llm.model.")
+        raise LLMError("Missing LLM model. Set OPENAI_MODEL (legacy LLM_MODEL is also accepted) or llm.model.")
     if not api_key:
         raise LLMError("Missing API key. Set OPENAI_API_KEY or llm.api_key_env.")
 
@@ -93,7 +93,7 @@ def call_chat_completion(cfg: dict[str, Any], system_prompt: str, user_payload: 
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=int(llm_cfg.get("timeout_seconds", 60))) as response:
+        with urllib.request.urlopen(req, timeout=int(llm_cfg.get("timeout_seconds", 300))) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")

@@ -30,6 +30,7 @@ from core.run_records import assert_run_can_start, save_run_manifest, record_fai
 from uuid import uuid4
 from core.plan_objects import bind_plan_objects, validate_object_writes, object_manifest_fields, reconcile_created_pages
 from core.skill_runtime import run_skill_runtime
+from core.llm_plan import LLMPlanError, topic_pages_from_llm
 from core.log_manager import write_run_log
 from core.index_builder import update_index
 from core.finalizer import make_finalize_plan
@@ -60,7 +61,7 @@ from core.config import (
     write_json,
 )
 from core.vault import Note, VaultIndex, build_index
-from core.retrieval import Retriever, annotate_pages, query_terms as retrieval_terms
+from core.retrieval import Retriever, Selection, annotate_pages, query_terms as retrieval_terms
 from core.state import (
     changed_notes,
     load_processed_index,
@@ -835,7 +836,7 @@ def make_execution_plan(
                 action["execution_mode"] = "plan_preview"
                 action["planned_pages"] = len(planned_pages)
                 action["planned_inputs"] = len(plan_executor_result.get("inputs", []))
-        if plan_executor_result.get("issues"):
+        if plan_executor_result.get("issues") and not (use_llm and primary_skill == "topic-insight-miner"):
             manual_review.append({
                 "type": "planned_executor_issues",
                 "risk": "medium",
@@ -889,18 +890,14 @@ def make_execution_plan(
         if str(page.get("rel_path", "")).startswith("wiki/sources/") and not page_has_blocked_placeholder(page):
             page["review_required"] = False
             page["confidence"] = "high"
-    review_pages = [p for p in planned_pages if page_requires_manual_review(p)]
-    if review_pages:
-        manual_review.append({
-            "type": "planned_pages_require_review",
-            "risk": "medium",
-            "reason": "plan contains review_required or low-confidence pages; approve the queue before review apply-approved.",
-            "items": [p.get("rel_path") for p in review_pages[:20]],
-        })
-
     llm_result: dict[str, Any] | None = None
     if use_llm and not scheduled:
         input_notes = select_llm_input_notes(index, cfg, task, primary_skill, input_scope, processed_index, retriever)
+        llm_selection = (
+            Selection(input_notes, retriever.history[-1])
+            if primary_skill == "topic-insight-miner" and retriever.history
+            else None
+        )
         document_builder = retriever.documents if retriever.history else llm_documents
         docs = document_builder(input_notes, int(cfg["scan"].get("max_source_chars", 6000)))
         llm_result = run_skill_runtime(ROOT, cfg, primary_skill, task, docs, mock=mock_llm)
@@ -910,13 +907,70 @@ def make_execution_plan(
                 action["llm_skill_path"] = llm_result.get("skill_path")
                 action["llm_items"] = len(llm_result.get("items", []))
                 action["llm_ok"] = llm_result.get("ok")
+                action["planned_inputs"] = len(input_notes)
+
+        # v1 writeback is intentionally narrow: only topic-insight-miner has a
+        # complete, reviewed page contract. Other LLM Skills remain previews.
+        if primary_skill == "topic-insight-miner":
+            non_primary_pages = [p for p in planned_pages if p.get("skill") != primary_skill]
+            if llm_result.get("ok"):
+                try:
+                    if llm_selection is None:
+                        raise LLMPlanError("LLM 选题缺少可复核的检索快照，拒绝生成可写提案")
+                    llm_pages = topic_pages_from_llm(cfg, llm_result, plan_run_id)
+                    annotate_pages(llm_pages, llm_selection)
+                    llm_issues = [
+                        issue
+                        for page in llm_pages
+                        for issue in validate_markdown(index, page["content"], page.get("sources", []))
+                    ]
+                    if llm_issues:
+                        raise LLMPlanError("LLM 选题页未通过落盘校验：" + "；".join(llm_issues[:10]))
+                    planned_pages = non_primary_pages + llm_pages
+                    llm_result["writeback_used"] = True
+                    llm_result["writeback_pages"] = len(llm_pages)
+                except LLMPlanError as exc:
+                    planned_pages = non_primary_pages
+                    llm_result["writeback_used"] = False
+                    llm_result["writeback_pages"] = 0
+                    llm_result.setdefault("issues", []).append(str(exc))
+                    manual_review.append({
+                        "type": "llm_writeback_blocked",
+                        "risk": "medium",
+                        "reason": "LLM 返回已收到，但未通过受控落盘契约；没有回退写入模板页。",
+                        "items": [str(exc)],
+                    })
+            else:
+                # --llm means the user asked for LLM-authored topic cards.
+                # Provider/contract failure must not silently fall back to the
+                # deterministic executor template and make apply write the wrong page.
+                planned_pages = non_primary_pages
+                llm_result["writeback_used"] = False
+                llm_result["writeback_pages"] = 0
+
+            for action in actions:
+                if action.get("operation") == "run_primary_skill" and action.get("skill") == primary_skill:
+                    action["planned_pages"] = len([p for p in planned_pages if p.get("skill") == primary_skill])
+                    action["llm_writeback_used"] = bool(llm_result.get("writeback_used"))
+
         if llm_result.get("issues"):
             manual_review.append({
                 "type": "llm_runtime_issues",
                 "risk": "medium",
-                "reason": "LLM Skill Runtime returned validation or provider issues; review before apply.",
+                "reason": "LLM Skill Runtime returned validation, provider, or writeback issues; review before apply.",
                 "items": llm_result.get("issues", [])[:20],
             })
+
+    # Review gating is computed after optional LLM writeback so the queue always
+    # describes the pages that could actually be applied, not discarded templates.
+    review_pages = [p for p in planned_pages if page_requires_manual_review(p)]
+    if review_pages:
+        manual_review.append({
+            "type": "planned_pages_require_review",
+            "risk": "medium",
+            "reason": "plan contains review_required or low-confidence pages; approve the queue before review apply-approved.",
+            "items": [p.get("rel_path") for p in review_pages[:20]],
+        })
 
     return {
         "run_id": plan_run_id,
