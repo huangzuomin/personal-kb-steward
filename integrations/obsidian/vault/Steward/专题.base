@@ -1,0 +1,90 @@
+{
+  "filters": {
+    "and": [
+      "file.ext == \"md\"",
+      "file.inFolder(\"wiki\")",
+      "note.type == \"topic-page\""
+    ]
+  },
+  "formulas": {
+    "topic": "file.asLink(if(note.title, note.title, file.name))",
+    "lifecycle": "note.status",
+    "stage": "note.stage",
+    "review": "if(note.review_required == true || note.review_required == \"true\", \"有标记（不是队列）\", \"无标记（不是已核实）\")",
+    "revision": "if(note.revision, note.revision, \"未记录\")",
+    "identity": "if(note.object_id, note.object_id, \"legacy（未分配）\")",
+    "modified": "file.mtime"
+  },
+  "properties": {
+    "formula.topic": {
+      "displayName": "专题"
+    },
+    "formula.lifecycle": {
+      "displayName": "知识生命周期"
+    },
+    "formula.stage": {
+      "displayName": "工作阶段"
+    },
+    "formula.review": {
+      "displayName": "页面审核标记"
+    },
+    "formula.revision": {
+      "displayName": "版本"
+    },
+    "formula.identity": {
+      "displayName": "对象 ID"
+    },
+    "formula.modified": {
+      "displayName": "文件修改时间"
+    }
+  },
+  "views": [
+    {
+      "type": "table",
+      "name": "全部专题",
+      "order": [
+        "formula.topic",
+        "formula.lifecycle",
+        "formula.stage",
+        "formula.review",
+        "formula.revision",
+        "formula.identity"
+      ]
+    },
+    {
+      "type": "table",
+      "name": "最近7天修改",
+      "filters": "file.mtime >= now() - \"7d\"",
+      "order": [
+        "formula.topic",
+        "formula.modified",
+        "formula.revision"
+      ],
+      "sort": [
+        {
+          "property": "formula.modified",
+          "direction": "DESC"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "name": "页面审核标记",
+      "filters": {
+        "or": [
+          "note.review_required == true",
+          "note.review_required == \"true\"",
+          "note.status == \"manual_review\"",
+          "note.status == \"conflict\""
+        ]
+      },
+      "order": [
+        "formula.topic",
+        "formula.review",
+        "formula.lifecycle",
+        "formula.stage",
+        "formula.revision"
+      ]
+    }
+  ]
+}
