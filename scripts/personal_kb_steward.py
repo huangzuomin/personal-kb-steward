@@ -899,13 +899,10 @@ def make_execution_plan(
         llm_result = run_skill_runtime(ROOT, cfg, primary_skill, task, docs, mock=mock_llm)
         for action in actions:
             if action.get("operation") == "run_primary_skill":
-                action["execution_mode"] = "llm_skill_runtime"
-                action["llm_skill_path"] = llm_result.get("skill_path")
-                action["llm_items"] = len(llm_result.get("items", []))
-                action["llm_ok"] = llm_result.get("ok")
-                action["planned_inputs"] = len(input_notes)
+                action.update({"execution_mode": "llm_skill_runtime", "llm_skill_path": llm_result.get("skill_path"),
+                               "llm_items": len(llm_result.get("items", [])), "llm_ok": llm_result.get("ok"),
+                               "planned_inputs": len(input_notes)})
 
-        # Only topic-insight-miner has a complete v1 LLM writeback contract.
         if primary_skill == "topic-insight-miner":
             planned_pages, writeback_issue = integrate_topic_llm_writeback(
                 cfg, planned_pages, llm_result, input_notes, llm_retrieval_report, plan_run_id,
@@ -916,8 +913,8 @@ def make_execution_plan(
                                       "items": [writeback_issue]})
             for action in actions:
                 if action.get("operation") == "run_primary_skill" and action.get("skill") == primary_skill:
-                    action["planned_pages"] = len([p for p in planned_pages if p.get("skill") == primary_skill])
-                    action["llm_writeback_used"] = bool(llm_result.get("writeback_used"))
+                    action.update({"planned_pages": len([p for p in planned_pages if p.get("skill") == primary_skill]),
+                                   "llm_writeback_used": bool(llm_result.get("writeback_used"))})
 
         if llm_result.get("issues"):
             manual_review.append({"type": "llm_runtime_issues", "risk": "medium",
