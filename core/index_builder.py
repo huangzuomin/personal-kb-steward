@@ -17,20 +17,53 @@ def generated_index_path(root: Path) -> Path:
     return root / ".openclaw" / "generated-index.md"
 
 
+# Key -> section label for the generated index. Values are resolved through
+# `config.write`, so a customised layout never produces links into a tree that
+# does not exist.
+INDEXED_DIR_KEYS = {
+    "seed_dir": "seeds",
+    "topics_dir": "topics",
+    "concepts_dir": "concepts",
+    "cases_dir": "cases",
+    "materials_dir": "material-packs",
+}
+# Upstream layout, used only when config.write omits a key entirely.
+LEGACY_INDEX_DIRS = {
+    "seeds": "wiki/seeds", "topics": "wiki/topics", "concepts": "wiki/concepts",
+    "cases": "wiki/cases", "material-packs": "wiki/material-packs",
+}
+
+
+def indexed_dirs(cfg: dict[str, Any]) -> dict[str, str]:
+    """Relative dirs for the index, taken from `config.write` (never hardcoded).
+
+    A missing `write` section falls back to the upstream layout rather than
+    yielding nothing: an empty result would silently stop creating READMEs.
+    """
+    write = cfg.get("write") if isinstance(cfg, dict) else None
+    write = write if isinstance(write, dict) else {}
+    resolved: dict[str, str] = {}
+    for key, label in INDEXED_DIR_KEYS.items():
+        value = str(write.get(key) or LEGACY_INDEX_DIRS[label]).replace("\\", "/").strip("/")
+        if value:
+            resolved[label] = value
+    return resolved
+
+
 def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
     """Updates managed index files without overwriting a user-owned root index.md."""
     root = index.root
     run_id = str(cfg.get("_run_id") or datetime.now(timezone.utc).strftime("index-%Y%m%d-%H%M%S"))
-    
+    dirs = indexed_dirs(cfg)
+
     # 1. Ensure core directories have a README.md
-    core_dirs = ["seeds", "topics", "concepts", "projects", "cases", "material-packs"]
-    for d in core_dirs:
-        dir_path = root / "wiki" / d
+    for label, rel_dir in dirs.items():
+        dir_path = root / rel_dir
         if not dir_path.exists():
             continue
         readme_path = dir_path / "README.md"
         if not readme_path.exists():
-            title = f"{d.title()} Index"
+            title = f"{label.title()} Index"
             content = (
                 frontmatter(
                     title,
@@ -74,15 +107,17 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
 
     # - 核心入口 (Core Entrances)
     core_entrances = []
-    for d in core_dirs:
-        if (root / "wiki" / d).exists():
-            core_entrances.append(f"- [[wiki/{d}/README.md]]")
+    for label, rel_dir in dirs.items():
+        if (root / rel_dir).exists():
+            core_entrances.append(f"- [[{rel_dir}/README.md]]")
     entrances_section = "\n".join(core_entrances) if core_entrances else "- 暂无入口"
 
     # - 当前活跃专题 (Active Topics)
+    topics_dir = dirs.get("topics", "")
+    topics_prefix = f"{topics_dir}/" if topics_dir else None
     active_topics = []
     for note in index.notes:
-        if note.rel.startswith("wiki/topics/") and note.metadata:
+        if topics_prefix and note.rel.startswith(topics_prefix) and note.metadata:
             status = note.metadata.get("status", "")
             if status == "growing":
                 active_topics.append(f"- [[{note.rel}]]")

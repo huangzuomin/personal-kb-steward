@@ -15,6 +15,74 @@ from .vault import Note, VaultIndex
 
 DEFAULT_PREFIXES = ("raw/", "quicknote/", "inbox/", "wiki/seeds/", "wiki/topics/", "wiki/sources/",
                     "wiki/evidence/", "wiki/gaps/", "wiki/claim-checks/")
+
+# --- Path authority -------------------------------------------------------
+# `config.write.*` is the single source of truth for where knowledge objects
+# live. Never hardcode a directory name again: a mismatch here means the tool
+# writes to one tree and searches another, so freshly written notes are
+# invisible and get regenerated in a loop (silent, no error).
+#
+# The keys map 1:1 onto config.write so a custom layout cannot silently break
+# retrieval. Order matters: seeds before topics keeps recall deterministic.
+KNOWLEDGE_DIR_KEYS = ("seed_dir", "topics_dir", "sources_dir", "work_memory_dir",
+                      "evidence_dir", "gaps_dir", "claims_dir", "concepts_dir",
+                      "cases_dir", "materials_dir")
+INPUT_DIRS = ("raw", "quicknote", "inbox")
+# Upstream layout, used only when no config is available (e.g. a bare import).
+LEGACY_KNOWLEDGE_DIRS = ("wiki/seeds", "wiki/topics", "wiki/sources", "wiki/work-memory",
+                         "wiki/evidence", "wiki/gaps", "wiki/claim-checks")
+
+
+def knowledge_prefixes(cfg: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """Knowledge-object prefixes taken from `config.write`, not literal strings."""
+    write = cfg.get("write") if isinstance(cfg, dict) else None
+    write = write if isinstance(write, dict) else {}
+    dirs: list[str] = []
+    for key in KNOWLEDGE_DIR_KEYS:
+        value = str(write.get(key) or "").replace("\\", "/").strip("/")
+        if value:
+            dirs.append(value)
+    if not dirs:
+        dirs = list(LEGACY_KNOWLEDGE_DIRS)
+    return tuple(f"{d}/" for d in dirs)
+
+
+def retrieval_prefixes(cfg: dict[str, Any] | None = None,
+                       knowledge: tuple[str, ...] | None = None) -> tuple[str, ...]:
+    """Default recall scope: raw inputs first, then knowledge objects."""
+    return tuple(f"{d}/" for d in INPUT_DIRS) + (knowledge if knowledge is not None else knowledge_prefixes(cfg))
+
+
+def knowledge_prefixes_with_inputs(cfg: dict[str, Any] | None = None,
+                                   knowledge: tuple[str, ...] | None = None) -> tuple[str, ...]:
+    """Knowledge objects first, `raw/` last: for cross-source synthesis tasks."""
+    return (knowledge if knowledge is not None else knowledge_prefixes(cfg)) + ("raw/",)
+
+
+# --- Page predicates ------------------------------------------------------
+# These live here, not in the runner, because the runner has a hard line cap
+# and these are pure functions over config + a page dict.
+def _dir_prefix(write: dict[str, Any], key: str, fallback: str) -> tuple[str, ...]:
+    text = str(write.get(key) or fallback).replace("\\", "/").strip("/")
+    return (f"{text}/",)
+
+
+def topic_prefixes(cfg: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """Topics prefix from config; the literal is only a no-config fallback."""
+    return _dir_prefix((cfg or {}).get("write") or {}, "topics_dir", "wiki/topics")
+
+
+def source_prefixes(cfg: dict[str, Any] | None = None) -> tuple[str, ...]:
+    return _dir_prefix((cfg or {}).get("write") or {}, "sources_dir", "wiki/sources")
+
+
+def is_topic_page(page: dict[str, Any], cfg: dict[str, Any] | None = None) -> bool:
+    return str(page.get("rel_path", "")).startswith(topic_prefixes(cfg))
+
+
+def is_source_page(page: dict[str, Any], cfg: dict[str, Any] | None = None) -> bool:
+    return str(page.get("rel_path", "")).startswith(source_prefixes(cfg))
+
 # Strip only known task boilerplate, not arbitrary Chinese substrings or inferred concepts.
 BOILERPLATE = re.compile(r"准备写作素材|生成写作材料包|生成材料包|发现选题|发现主题|写作素材|材料包|素材包|围绕|关于|material pack", re.I)
 STOPWORDS = {"the", "and", "for", "with", "from", "this", "that", "about", "please",
@@ -22,10 +90,33 @@ STOPWORDS = {"the", "and", "for", "with", "from", "this", "that", "about", "plea
 NOTICE = "检索不等于事实核实；旧依据需复查。内容来自当前扫描的 Markdown，不从缓存回写。"
 
 
+# Words that mark a fact line as a case. Kept generic on purpose: upstream also
+# listed a specific city name here, which labelled any line mentioning that city
+# as a case regardless of what it described.
+CASE_MARKERS = ("案例", "FT", "NYT", "BBC", "CBC", "项目", "实践")
+
+
+def fallback_terms(query: str) -> list[str]:
+    """Query's own words, for when stopword filtering leaves nothing.
+
+    A hardcoded vocabulary here made every vault search as though it were the
+    upstream demo corpus, so the fallback is derived from the query instead.
+    """
+    return [q.lower() for q in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}|[\u4e00-\u9fff]{2,12}", query)]
+
+
 def query_terms(query: str) -> list[str]:
     clean = BOILERPLATE.sub(" ", query)
-    terms = [t.lower() for t in re.findall(r"[A-Za-z][A-Za-z0-9_+-]*|[\u4e00-\u9fff]+", clean)]
-    return list(dict.fromkeys(t for t in terms if t not in STOPWORDS))[:16] or ["ai", "新闻", "媒体", "温州", "知识"]
+    words = re.findall(r"[A-Za-z][A-Za-z0-9_+-]*|[\u4e00-\u9fff]+", clean)
+    terms = [t.lower() for t in words]
+    unique = list(dict.fromkeys(t for t in terms if t not in STOPWORDS))[:16]
+    if unique:
+        return unique
+    # No extractable term (empty query, or boilerplate only). The old fallback
+    # was a hardcoded demo vocabulary ("ai 新闻 媒体 温州 知识"), which made every
+    # vault search as though it were the upstream demo corpus. Fall back to the
+    # query's own words instead, so the behaviour stays vault-neutral.
+    return list(dict.fromkeys(terms))[:16]
 
 
 def excerpt(note: Note, terms: list[str], limit: int) -> str:
@@ -77,10 +168,14 @@ class Retriever:
             self.cached, self.pending = {}, {}
             self.incoming.clear()
 
-    def select(self, query: str, *, limit: int = 12, prefixes: tuple[str, ...] = DEFAULT_PREFIXES,
+    def select(self, query: str, *, limit: int = 12, prefixes: tuple[str, ...] | None = None,
                note_type: str | None = None, note_status: str | None = None) -> Selection:
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("检索 limit 必须为 1 至 100")
+        # None means "use the configured layout"; callers that pass an explicit
+        # tuple still get exactly that scope.
+        if prefixes is None:
+            prefixes = retrieval_prefixes(self.cfg)
         self._load()
         terms = query_terms(query)
         eligible = {}
@@ -167,11 +262,28 @@ class Retriever:
             hits.append(hit)
         return hits
 
-    def documents(self, notes: list[Note], max_chars: int) -> list[dict]:
-        return [{"path": n.rel, "title": n.title, "type": str(n.metadata.get("type", "")),
-                 "status": str(n.metadata.get("status", "")), "stage": str(n.metadata.get("stage", "")),
-                 "content": excerpt(n, self.terms, max_chars), "retrieval": self.hits.get(n.rel, {}),
-                 "usage_note": NOTICE} for n in notes]
+    def documents(self, notes: list[Note], max_chars: int,
+                  total_budget: int = 0) -> list[dict]:
+        """Build LLM input documents under an optional whole-set character budget.
+
+        `max_chars` caps each document; `total_budget` caps the sum. When a budget
+        is set, every document still gets a fair share (budget / len(notes)) so that
+        one long note cannot crowd out the rest, and later documents borrow whatever
+        earlier ones left unused. Without a budget, behaviour is unchanged.
+        """
+        share = total_budget // len(notes) if total_budget and notes else 0
+        allowance = min(max_chars, share) if share else max_chars
+        spare = 0
+        docs = []
+        for note in notes:
+            limit = min(max_chars, allowance + spare)
+            content = excerpt(note, self.terms, limit)
+            spare = max(0, allowance + spare - len(content)) if total_budget else 0
+            docs.append({"path": note.rel, "title": note.title, "type": str(note.metadata.get("type", "")),
+                         "status": str(note.metadata.get("status", "")), "stage": str(note.metadata.get("stage", "")),
+                         "content": content, "retrieval": self.hits.get(note.rel, {}),
+                         "usage_note": NOTICE})
+        return docs
 
 
 def annotate_pages(pages: list[dict], selection: Selection) -> None:

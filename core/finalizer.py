@@ -9,8 +9,78 @@ from pathlib import Path
 from typing import Any
 
 from .config import sha256_text
+from .initializer import readable_filename
 from .plan_objects import update_base
 from .vault import Note, build_index, parse_frontmatter
+
+
+# `config.write` is the only source of truth for knowledge-object locations.
+# Hardcoding these produced links into a tree that need not exist.
+FINALIZE_DIR_KEYS = ("topics_dir", "materials_dir", "concepts_dir", "cases_dir", "sources_dir")
+FINALIZE_DIR_FALLBACK = {
+    "topics_dir": "wiki/topics", "materials_dir": "wiki/material-packs",
+    "concepts_dir": "wiki/concepts", "cases_dir": "wiki/cases", "sources_dir": "wiki/sources",
+}
+
+
+def write_dirs(cfg: dict[str, Any]) -> dict[str, str]:
+    """Trailing-slash prefixes for every dir finalize reads or writes."""
+    write = cfg.get("write") if isinstance(cfg, dict) else None
+    write = write if isinstance(write, dict) else {}
+    out: dict[str, str] = {}
+    for key in FINALIZE_DIR_KEYS:
+        value = str(write.get(key) or FINALIZE_DIR_FALLBACK[key]).replace("\\", "/").strip("/")
+        out[key.removesuffix("_dir")] = f"{value}/"
+    return out
+
+
+# Aggregation pages must be named after the material they summarise, never after
+# a demo corpus. Upstream hardcoded city and agency names here, so every vault
+# produced the same "温州 AI 政策与产业" pages no matter what the sources said.
+FINALIZE_AGG_KINDS = ("topic", "material", "concept", "case")
+FINALIZE_AGG_DIR = {"topic": "topics", "material": "materials", "concept": "concepts", "case": "cases"}
+FINALIZE_AGG_TYPE = {
+    "topic": "topic-page", "material": "material-pack",
+    "concept": "concept-page", "case": "case-story",
+}
+# Kept separate from the kind so the emitted tag stays byte-identical to upstream.
+FINALIZE_AGG_TAG = {
+    "topic": "topic", "material": "material-pack",
+    "concept": "concept", "case": "case",
+}
+
+
+def aggregation_specs(cfg: dict[str, Any], top_topics: list[str]) -> list[dict[str, Any]]:
+    """Aggregation page specs: derived from the material first, config second.
+
+    The topic title comes from the 「提取的专题」 entries that the source notes
+    themselves carry, so the page is named after what was actually compiled.
+    Material/concept/case pages need an explicit `cfg["finalize_aggregation"]`
+    entry — without one they are simply not produced, which is the safer
+    default: inventing an aggregation page is worse than omitting it.
+    """
+    configured = cfg.get("finalize_aggregation")
+    configured = configured if isinstance(configured, dict) else {}
+    specs: list[dict[str, Any]] = []
+    for kind in FINALIZE_AGG_KINDS:
+        spec = configured.get(kind)
+        spec = spec if isinstance(spec, dict) else {}
+        title = str(spec.get("title") or "").strip()
+        if kind == "topic" and top_topics:
+            title = top_topics[0]
+        if not title:
+            continue
+        markers = [str(m) for m in (spec.get("match_any") or []) if str(m).strip()]
+        specs.append({
+            "kind": kind,
+            "title": title,
+            "type": FINALIZE_AGG_TYPE[kind],
+            "tag": FINALIZE_AGG_TAG[kind],
+            "dir": FINALIZE_AGG_DIR[kind],
+            "markers": markers,
+            "intro": str(spec.get("intro") or "").strip(),
+        })
+    return specs
 
 
 def _section(body: str, title_prefix: str) -> list[str]:
@@ -164,7 +234,9 @@ def _update_source_note(note: Note, related: list[str], tags: list[str], run_id:
 
 def make_finalize_plan(cfg: dict[str, Any], *, plan_run_id: str, stamp: str, apply_updates: bool = False) -> dict[str, Any]:
     index = build_index(cfg)
-    source_notes = [n for n in index.notes if n.rel.startswith("wiki/sources/") and n.metadata.get("type") == "source-note"]
+    dirs = write_dirs(cfg)
+    sources_prefix = dirs["sources"]
+    source_notes = [n for n in index.notes if n.rel.startswith(sources_prefix) and n.metadata.get("type") == "source-note"]
     sources = [n.rel for n in source_notes]
     pages: list[dict[str, Any]] = []
     if len(source_notes) < 2:
@@ -174,78 +246,97 @@ def make_finalize_plan(cfg: dict[str, Any], *, plan_run_id: str, stamp: str, app
     quality = _dedupe_items([item for n in source_notes for item in _section(n.body, "质量")], limit=30)
     topic_counts = Counter(topic.split("：", 1)[0].split(":", 1)[0].strip() for topic in topics)
     top_topics = [item for item, _ in topic_counts.most_common(8) if item]
-    related_agg = ["wiki/topics/温州人工智能创新发展路径.md", "wiki/material-packs/温州AI政策与产业研究资料包.md", "wiki/concepts/人工智能创新发展先行市.md", "wiki/cases/温州AI应用与机构建设案例线索.md"]
-    case_facts = _dedupe_items([x for x in facts if any(k in x for k in ["揭牌", "瓯海", "财政", "车间", "智能眼镜", "应用", "平台"])], limit=16)
-    concept_facts = _dedupe_items([x for x in facts if any(k in x for k in ["人工智能局", "先行市", "政策", "目标", "算力"])], limit=12)
+    agg_specs = aggregation_specs(cfg, top_topics)
+    spec_by_kind = {spec["kind"]: spec for spec in agg_specs}
+    agg_targets = {
+        spec["kind"]: f"{dirs[spec['dir']]}{readable_filename(spec['title'], spec['kind'])}.md"
+        for spec in agg_specs
+    }
+    topics_prefix = dirs["topics"]
+    related_agg = [agg_targets[spec["kind"]] for spec in agg_specs]
     critical = _critical_findings(facts, quality, sources)
-    topic_body = "\n".join([
-        "## 综合判断",
-        "温州 AI 资料呈现出政策牵引、机构建设、产业平台、场景应用和公共治理并行推进的路径。",
-        "",
-        *_body_link_section([x for x in related_agg if not x.startswith("wiki/topics/")]),
-        "## 高频专题",
-        *[f"- {x}" for x in top_topics[:8]],
-        "",
-        "## 去重后的关键事实",
-        *[f"- {x}" for x in facts[:20]],
-        "",
-        "## 反方证据与信息缺口",
-        *[f"- {x}" for x in critical],
-        "",
-        "## 来源索引",
-        *[f"- [[{x}]]" for x in sources[:24]],
-    ])
-    material_case_facts = [item for item in case_facts[:16] if item not in facts[:24]]
-    if not material_case_facts:
-        material_case_facts = ["案例条目已在上方事实区去重呈现，详见 [[wiki/cases/温州AI应用与机构建设案例线索.md]]。"]
-    material_body = "\n".join([
-        "## 用途",
-        "为研究、汇报和写作提供可追溯的温州 AI 政策与产业资料包。",
-        "",
-        *_body_link_section(["wiki/topics/温州人工智能创新发展路径.md", "wiki/concepts/人工智能创新发展先行市.md", "wiki/cases/温州AI应用与机构建设案例线索.md"]),
-        "## 去重后的可用事实",
-        *[f"- {x}" for x in facts[:24]],
-        "",
-        "## 可用案例",
-        *[f"- {x}" for x in material_case_facts],
-        "",
-        "## 反方证据与信息缺口",
-        *[f"- {x}" for x in critical],
-        "",
-        "## 质量风险",
-        *[f"- {x}" for x in quality[:10]],
-        "",
-        "## 来源索引",
-        *[f"- [[{x}]]" for x in sources[:24]],
-    ])
-    concept_body = "\n".join([
-        "## 概念说明",
-        "人工智能创新发展先行市是地方政府围绕 AI 基础设施、产业生态、示范应用和治理机制进行系统部署的城市发展目标。",
-        "",
-        *_body_link_section(["wiki/topics/温州人工智能创新发展路径.md", "wiki/material-packs/温州AI政策与产业研究资料包.md", "wiki/cases/温州AI应用与机构建设案例线索.md"]),
-        "## 证据线索",
-        *[f"- {x}" for x in concept_facts],
-        "",
-        "## 概念边界与待验证问题",
-        *[f"- {x}" for x in critical[:6]],
-    ])
-    case_body = "\n".join([
-        "## 案例线索",
-        "以下案例来自 source-note 的关键事实抽取，后续可拆成独立 case-story。",
-        "",
-        *_body_link_section(["wiki/topics/温州人工智能创新发展路径.md", "wiki/material-packs/温州AI政策与产业研究资料包.md", "wiki/concepts/人工智能创新发展先行市.md"]),
-        *[f"- {x}" for x in case_facts],
-        "",
-        "## 案例缺口",
-        *[f"- {x}" for x in critical[:6]],
-    ])
-    for target, title, type_, body, kind in [
-        ("wiki/topics/温州人工智能创新发展路径.md", "温州人工智能创新发展路径", "topic-page", topic_body, "topic"),
-        ("wiki/material-packs/温州AI政策与产业研究资料包.md", "温州AI政策与产业研究资料包", "material-pack", material_body, "material-pack"),
-        ("wiki/concepts/人工智能创新发展先行市.md", "人工智能创新发展先行市", "concept-page", concept_body, "concept"),
-        ("wiki/cases/温州AI应用与机构建设案例线索.md", "温州AI应用与机构建设案例线索", "case-story", case_body, "case"),
-    ]:
-        pages.append(_page(kind, target, title, type_, sources, [x for x in related_agg if x != target], body, plan_run_id, index.by_rel.get(target)))
+
+    def _others(kind: str) -> list[str]:
+        return [x for x in related_agg if x != agg_targets.get(kind)]
+
+    def _marker_facts(kind: str, limit: int) -> list[str]:
+        markers = spec_by_kind.get(kind, {}).get("markers") or []
+        if not markers:
+            return []
+        return _dedupe_items([x for x in facts if any(k in x for k in markers)], limit=limit)
+
+    case_facts = _marker_facts("case", 16)
+    concept_facts = _marker_facts("concept", 12)
+    bodies: dict[str, str] = {}
+    if "topic" in spec_by_kind:
+        bodies["topic"] = "\n".join([
+            "## 综合判断",
+            spec_by_kind["topic"]["intro"] or f"本页汇总 {len(sources)} 个 source-note 的跨源结论；标题取自资料自身的「提取的专题」。",
+            "",
+            *_body_link_section([x for x in related_agg if not x.startswith(topics_prefix)]),
+            "## 高频专题",
+            *[f"- {x}" for x in top_topics[:8]],
+            "",
+            "## 去重后的关键事实",
+            *[f"- {x}" for x in facts[:20]],
+            "",
+            "## 反方证据与信息缺口",
+            *[f"- {x}" for x in critical],
+            "",
+            "## 来源索引",
+            *[f"- [[{x}]]" for x in sources[:24]],
+        ])
+    if "material" in spec_by_kind:
+        material_case_facts = [item for item in case_facts[:16] if item not in facts[:24]]
+        if not material_case_facts:
+            material_case_facts = ["案例条目已在上方事实区去重呈现。"]
+        bodies["material"] = "\n".join([
+            "## 用途",
+            spec_by_kind["material"]["intro"] or "为后续写作、研究或汇报提供一组可追溯的资料。",
+            "",
+            *_body_link_section(_others("material")),
+            "## 去重后的可用事实",
+            *[f"- {x}" for x in facts[:24]],
+            "",
+            "## 可用案例",
+            *[f"- {x}" for x in material_case_facts],
+            "",
+            "## 反方证据与信息缺口",
+            *[f"- {x}" for x in critical],
+            "",
+            "## 质量风险",
+            *[f"- {x}" for x in quality[:10]],
+            "",
+            "## 来源索引",
+            *[f"- [[{x}]]" for x in sources[:24]],
+        ])
+    if "concept" in spec_by_kind:
+        bodies["concept"] = "\n".join([
+            "## 概念说明",
+            spec_by_kind["concept"]["intro"] or "本页汇总跨源出现的概念定义候选，需人工确认边界。",
+            "",
+            *_body_link_section(_others("concept")),
+            "## 证据线索",
+            *[f"- {x}" for x in concept_facts],
+            "",
+            "## 概念边界与待验证问题",
+            *[f"- {x}" for x in critical[:6]],
+        ])
+    if "case" in spec_by_kind:
+        bodies["case"] = "\n".join([
+            "## 案例线索",
+            spec_by_kind["case"]["intro"] or "以下案例来自 source-note 的关键事实抽取，后续可拆成独立 case-story。",
+            "",
+            *_body_link_section(_others("case")),
+            *[f"- {x}" for x in case_facts],
+            "",
+            "## 案例缺口",
+            *[f"- {x}" for x in critical[:6]],
+        ])
+    for spec in agg_specs:
+        kind = spec["kind"]
+        target = agg_targets[kind]
+        pages.append(_page(spec["tag"], target, spec["title"], spec["type"], sources, _others(kind), bodies[kind], plan_run_id, index.by_rel.get(target)))
     token_map = {n.rel: _tokens(n.title + "\n" + n.body[:4000]) for n in source_notes}
     for note in source_notes:
         scores = [(len(token_map[note.rel] & toks), rel) for rel, toks in token_map.items() if rel != note.rel]
@@ -253,4 +344,4 @@ def make_finalize_plan(cfg: dict[str, Any], *, plan_run_id: str, stamp: str, app
         update = _update_source_note(note, related_sources + related_agg[:2], ["linked", "kb-finalize"], plan_run_id)
         if update:
             pages.append(update)
-    return {"run_id": plan_run_id, "created_at": stamp, "mode": "dry-run", "task": "finalize knowledge base", "entry": "finalize_kb", "primary_skill": "kb-finalize", "knowledge_base": str(index.root), "actions": [{"operation": "pipeline_stage", "entry": "finalize_kb", "stage": "cross_source_aggregation", "skill": "kb-finalize", "risk": "medium", "planned_inputs": len(source_notes), "planned_pages": len(pages)}], "planned_pages": pages, "plan_quality": {"source_notes": len(source_notes), "aggregation_pages": 4, "source_note_updates": max(0, len(pages) - 4)}, "manual_review": [], "apply_instruction": "审阅聚合与 related 更新后运行 apply-plan。"}
+    return {"run_id": plan_run_id, "created_at": stamp, "mode": "dry-run", "task": "finalize knowledge base", "entry": "finalize_kb", "primary_skill": "kb-finalize", "knowledge_base": str(index.root), "actions": [{"operation": "pipeline_stage", "entry": "finalize_kb", "stage": "cross_source_aggregation", "skill": "kb-finalize", "risk": "medium", "planned_inputs": len(source_notes), "planned_pages": len(pages)}], "planned_pages": pages, "plan_quality": {"source_notes": len(source_notes), "aggregation_pages": len(agg_specs), "source_note_updates": max(0, len(pages) - len(agg_specs))}, "manual_review": [], "apply_instruction": "审阅聚合与 related 更新后运行 apply-plan。"}

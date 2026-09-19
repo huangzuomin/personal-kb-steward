@@ -23,10 +23,38 @@ def new_object_id() -> str:
     return f"kb:{uuid4()}"
 
 
+# Knowledge objects live under this top-level dir. `config.write.*` may point
+# somewhere else (e.g. `_kb-steward/`), so the root is settable rather than a
+# literal. Callers that never set it keep the upstream `wiki/` behaviour.
+_DEFAULT_KNOWLEDGE_ROOT = "wiki"
+_KNOWLEDGE_ROOTS: tuple[str, ...] = (_DEFAULT_KNOWLEDGE_ROOT,)
+
+
+def bind_knowledge_roots(cfg: dict[str, Any] | None) -> tuple[str, ...]:
+    """Derive the knowledge-object roots from `config.write` and cache them."""
+    global _KNOWLEDGE_ROOTS
+    write = cfg.get("write") if isinstance(cfg, dict) else None
+    write = write if isinstance(write, dict) else {}
+    roots: list[str] = []
+    for value in write.values():
+        text = str(value or "").replace("\\", "/").strip("/")
+        if not text or "." in text.split("/")[-1]:
+            continue  # a file (e.g. log_file), not a directory
+        head = text.split("/")[0]
+        if head and head not in roots:
+            roots.append(head)
+    _KNOWLEDGE_ROOTS = tuple(roots) or (_DEFAULT_KNOWLEDGE_ROOT,)
+    return _KNOWLEDGE_ROOTS
+
+
+def knowledge_root() -> str:
+    return _KNOWLEDGE_ROOTS[0]
+
+
 def is_knowledge_path(path: str) -> bool:
     p = PurePosixPath(path.replace("\\", "/"))
     return (
-        len(p.parts) >= 2 and p.parts[0].lower() == "wiki"
+        len(p.parts) >= 2 and p.parts[0].lower() in _KNOWLEDGE_ROOTS
         and p.suffix.lower() == ".md" and p.name.lower() != "readme.md"
     )
 

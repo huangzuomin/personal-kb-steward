@@ -21,23 +21,51 @@ def run_skill_runtime(
     mock: bool = False,
 ) -> dict[str, Any]:
     spec = load_skill(root, skill_name)
+    contract = {
+        "top_level": "items",
+        "required_item_keys": [
+            "title",
+            "type",
+            "status",
+            "stage",
+            "sources",
+            "summary",
+            "confidence",
+            "review_required",
+        ],
+        "required_item_types": {
+            "title": "string（单行）",
+            "type": "string，固定 topic-card",
+            "status": "string",
+            "stage": "string",
+            "sources": "array<string>，必须是本次提供文档的完整相对路径",
+            "summary": "string",
+            "confidence": "string，low|medium|high",
+            "review_required": "boolean",
+        },
+        "optional_item_types": {
+            "one_sentence_topic": "string",
+            "tension": "string",
+            "why_now": "array<string>",
+            "signals": "array<string>",
+            "angles": "array<string>",
+            "risks": "array<string>",
+            "gaps": "array<string>",
+            "manual_review": "array<string>",
+            "score": "string",
+            "related": "array<string>，只能填本次提供文档的链接，禁止编造",
+            "pending_links": "array<string>，想引但知识库中不存在的目标写这里",
+        },
+        "type_rules": [
+            "array<string> 字段必须返回 JSON 数组，每项一个短句；禁止把整段文字塞进数组或写成单个字符串。",
+            "没有内容的可选字段请省略或返回空数组 []，不要用字符串填空。",
+        ],
+        "forbidden": ["source", "full_article", "draft_article"],
+    }
     payload = {
         "task": task,
         "skill": skill_name,
-        "output_contract": {
-            "top_level": "items",
-            "required_item_keys": [
-                "title",
-                "type",
-                "status",
-                "stage",
-                "sources",
-                "summary",
-                "confidence",
-                "review_required",
-            ],
-            "forbidden": ["source", "full_article", "draft_article"],
-        },
+        "output_contract": contract,
         "documents": documents,
     }
     try:
@@ -45,7 +73,7 @@ def run_skill_runtime(
             data = mock_skill_response(skill_name, task, documents)
             raw_text = json.dumps(data, ensure_ascii=False)
         else:
-            raw_text = call_chat_completion(cfg, build_system_prompt(spec), payload)
+            raw_text = call_chat_completion(cfg, build_system_prompt(spec, contract), payload)
             data = extract_json(raw_text)
     except (LLMError, json.JSONDecodeError, FileNotFoundError, KeyError) as exc:
         return {

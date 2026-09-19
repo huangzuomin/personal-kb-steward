@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from .claims import EvidenceError, compile_claims, render_claims, validate_claims
 from .config import sha256_text
-from .knowledge_objects import ObjectIdentityError, is_knowledge_path
+from .knowledge_objects import ObjectIdentityError, is_knowledge_path, knowledge_root
 from .llm import call_chat_completion
 from .markdown import frontmatter
 from .plan_objects import update_base
@@ -86,7 +86,7 @@ def _resolve(index: VaultIndex, topic: str, target: str | None, topics_dir: str)
     rel = f"{topics_dir}/topic-{name}.md"
     if (not is_knowledge_path(rel) or "\\" in rel or ".." in PurePosixPath(rel).parts
             or PurePosixPath(rel).as_posix() != rel):
-        raise ReconcileConflict("write.topics_dir 必须是规范的 wiki/ 子目录")
+        raise ReconcileConflict(f"write.topics_dir 必须是知识库子目录（当前根：{knowledge_root()}/）")
     if (index.root / rel).exists():
         raise ReconcileConflict(f"新主题的规范路径已被其他页面占用：{rel}；请指定 --target")
     return rel, None
