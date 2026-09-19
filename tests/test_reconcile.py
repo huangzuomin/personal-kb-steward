@@ -199,7 +199,7 @@ def test_bom_crlf_and_unowned_yaml_body_are_preserved(vault):
     assert b"# evidence record\r\n" in raw
 
 
-@pytest.mark.parametrize("answer", ["not json", json.dumps({"decision": "delete"}),
+@pytest.mark.parametrize("answer", ["not json", json.dumps({"decision": "delete"}), json.dumps({"decision": []}),
     provider("create", summary="No evidence.").return_value,
     provider("create", summary="Invented link. [[raw/missing.md]]").return_value,
     provider("create", summary="Claim [[raw/a.md]]\n\nUnattributed second paragraph.").return_value])

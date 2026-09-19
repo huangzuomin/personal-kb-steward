@@ -193,7 +193,8 @@ def make_reconcile_plan(cfg: dict[str, Any], topic: str, sources: list[str], *,
             "current_page": original, "sources": documents,
         })
         data = json.loads(response)
-        if not isinstance(data, dict) or data.get("decision") not in {"create", "update", "conflict", "noop"}:
+        if (not isinstance(data, dict) or not isinstance(data.get("decision"), str)
+                or data["decision"] not in {"create", "update", "conflict", "noop"}):
             raise ReconcileConflict("模型未返回合法的 reconcile 决定")
         decision, reason = data["decision"], data.get("reason")
         conflicts = data.get("conflicts", [])
