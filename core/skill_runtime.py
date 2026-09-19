@@ -8,7 +8,7 @@ from .json_contract import extract_json, validate_contract
 from .llm import LLMError, call_chat_completion, mock_skill_response
 from .renderer import render_previews
 from .skill_loader import build_system_prompt, load_skill
-from .validator import validate_skill_items
+from .validator import canonicalize_related_links, validate_skill_items
 
 
 def run_skill_runtime(
@@ -59,9 +59,9 @@ def run_skill_runtime(
             "previews": [],
         }
 
-    allowed_sources = {doc["path"] for doc in documents}
+    canonicalize_related_links(data, documents)
     issues = validate_contract(data)
-    issues.extend(validate_skill_items(data, allowed_sources))
+    issues.extend(validate_skill_items(data, documents))
     return {
         "enabled": True,
         "mock": mock,
