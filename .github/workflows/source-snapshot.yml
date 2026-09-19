@@ -1,0 +1,22 @@
+name: Isolated claim evidence source
+on:
+  push:
+    branches: ["transport/claim-evidence-source"]
+    paths: [".github/workflows/source-snapshot.yml"]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a9e9f0e2d59190432489c57377fdf7a0eae913a6
+          persist-credentials: false
+      - run: git archive --format=tar HEAD -o "$RUNNER_TEMP/steward-source.tar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: steward-source-a9e9f0e
+          path: ${{ runner.temp }}/steward-source.tar
+          retention-days: 1
