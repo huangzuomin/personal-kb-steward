@@ -42,7 +42,7 @@ python scripts\personal_kb_steward.py review
 
 ## 当前限制
 
-现有运行时仍是单 `primary_skill` 执行模型；完整 pipeline 编排、可预览 diff、逐项 approve/reject 会在后续阶段继续实现。
+按需任务目前仍以 `primary_skill` 为主，部分入口会执行显式 follow-up；定时任务和初始化流程已经可以组合多个阶段，但尚未形成通用的声明式 pipeline runtime。可预览 diff、逐项 approve/reject 和跨阶段事务仍需继续完善。
 
 ## 状态模型
 

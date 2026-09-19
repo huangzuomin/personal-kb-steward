@@ -14,7 +14,7 @@ import personal_kb_steward as steward  # noqa: E402
 
 class ApplyPlanTests(unittest.TestCase):
     def make_cfg(self, kb: Path) -> dict:
-        cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+        cfg = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8-sig"))
         cfg["knowledge_base"] = str(kb)
         cfg["state_file"] = str(kb / ".state.json")
         cfg["safety"]["plans_dir"] = str(kb / ".openclaw" / "plans")
@@ -56,7 +56,7 @@ class ApplyPlanTests(unittest.TestCase):
             self.assertGreaterEqual(len(plan["planned_pages"]), 1)
             plan_path = steward.write_execution_plan(cfg, plan)
 
-            self.assertEqual(steward.command_apply_plan(cfg, str(plan_path)), 0)
+            self.assertEqual(steward.command_apply_plan(cfg, str(plan_path), allow_reviewed=True), 0)
             created = [kb / page["rel_path"] for page in plan["planned_pages"]]
             self.assertTrue(all(path.exists() for path in created))
             generated_text = created[0].read_text(encoding="utf-8")

@@ -37,6 +37,7 @@ from core.safety import (
     backup_root,
     operation_log_path,
     recovery_hint,
+    require_delete_only_rollback,
     safe_delete_file,
     safe_write_text,
     user_next_step,
@@ -106,7 +107,7 @@ def update_processed_index(index: VaultIndex, cfg: dict[str, Any], operations: l
 def wikilink(rel: str) -> str:
     return f"[[{rel}]]"
 def pending_link(target: str) -> str:
-    return f"寰呭垱寤猴細{target}"
+    return f"待创建：{target}"
 def readable_filename(title: str, fallback: str = "未命名页面") -> str:
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", title).strip()
     cleaned = re.sub(r"[：:，,。；;、/\\\s]+", "-", cleaned).strip("-")
@@ -121,9 +122,9 @@ def safe_wikilink(index: VaultIndex, target: str) -> str:
     if not resolved:
         return pending_link(target)
     return wikilink(resolved)
-def link_list(items: list[str], empty: str = "鏆傛棤") -> str:
+def link_list(items: list[str], empty: str = "暂无") -> str:
     return bullet([pending_link(item) for item in items], empty)
-def safe_link_list(index: VaultIndex, items: list[str], empty: str = "鏆傛棤") -> str:
+def safe_link_list(index: VaultIndex, items: list[str], empty: str = "暂无") -> str:
     return bullet([safe_wikilink(index, item) for item in items], empty)
 def extract_wikilinks(text: str) -> list[str]:
     return re.findall(r"\[\[([^\]|#]+)", text)
@@ -171,7 +172,7 @@ def score_note(note: Note, query_terms: list[str]) -> int:
 def select_notes(index: VaultIndex, query: str, limit: int = 12, prefixes: tuple[str, ...] = ("raw/", "quicknote/", "inbox/", "wiki/seeds/", "wiki/topics/")) -> list[Note]:
     query_terms = tokens(query)
     if not query_terms:
-        query_terms = ["ai", "鏂伴椈", "濯掍綋", "娓╁窞", "鐭ヨ瘑"]
+        query_terms = ["ai", "新闻", "媒体", "温州", "知识"]
     scored: list[tuple[int, Note]] = []
     for note in index.notes:
         if not note.rel.startswith(prefixes):
@@ -373,7 +374,7 @@ def unique_path(path: Path) -> Path:
         candidate = Path(f"{base}-{i}{suffix}")
         if not candidate.exists():
             return candidate
-    raise RuntimeError(f"鏃犳硶鐢熸垚鍞竴鏂囦欢鍚嶏細{path}")
+    raise RuntimeError(f"无法生成唯一文件名：{path}")
 def write_page(index: VaultIndex, cfg: dict[str, Any], rel_dir: str, filename: str, content: str) -> str:
     path = unique_path(index.root / rel_dir / filename)
     safe_write_text(
@@ -404,7 +405,7 @@ def validate_markdown(index: VaultIndex, content: str, sources: list[str]) -> li
         if not resolved and target not in sources:
             issues.append(f"双链无法解析：{target}")
         elif resolved and target != resolved:
-            issues.append(f"鍙岄摼闈炶鑼冿細{target} -> {resolved}")
+            issues.append(f"双链非规范：{target} -> {resolved}")
     if "Manual synthesis required" in content or "No explicit" in content:
             issues.append("存在英文占位内容")
     return issues
@@ -473,6 +474,7 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
         if note.rel.startswith("wiki/") and not note.metadata:
             missing_meta.append(note.rel)
         status = str(note.metadata.get("status", "")).strip()
+        stage = str(note.metadata.get("stage", "")).strip()
         if status and status not in legal_status and status in legal_stage:
             stage_migrations.append({"file": note.rel, "current_status": status, "suggested_status": "growing", "suggested_stage": status})
         elif status and status not in legal_status:
@@ -494,7 +496,7 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
         if weak_topic_stub(note):
             weak_topics.append(note.rel)
         confidence = str(note.metadata.get("confidence", "")).strip().lower()
-        if note.rel.startswith("wiki/") and confidence == "low" and status == "active":
+        if note.rel.startswith("wiki/") and confidence == "low" and stage == "active":
             low_confidence_active.append(note.rel)
     inbound = Counter()
     for note in index.notes:
@@ -587,7 +589,7 @@ def evidence_items(notes: list[Note], query: str) -> list[dict[str, str]]:
         if not lines:
             lines = [note_summary(note, 180)]
         for line in lines[:3]:
-            kind = "妗堜緥" if any(x in line for x in ["妗堜緥", "FT", "NYT", "BBC", "CBC", "DeepSeek", "娓╁窞", "椤圭洰"]) else "浜嬪疄绾跨储"
+            kind = "案例" if any(x in line for x in ["案例", "FT", "NYT", "BBC", "CBC", "DeepSeek", "温州", "项目"]) else "事实线索"
             items.append({"source": note.rel, "kind": kind, "text": line})
     return items[:30]
 def merge_ops(skill: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -910,61 +912,61 @@ def make_execution_plan(
 
 
 def print_plan_summary(plan: dict[str, Any], path: Path, queued: int) -> None:
-    print(f"璁″垝鏂囦欢锛{path}")
-    print(f"鍏ュ彛锛{plan.get('entry')}")
-    print(f"Primary skill锛{plan.get('primary_skill')}")
-    print(f"鎵弿鑼冨洿锛{plan.get('scan_scope', 'changed')}")
-    print(f"鍙樻洿鏂囦欢浼拌锛{plan.get('changed_files')}")
+    print(f"计划文件：{path}")
+    print(f"入口：{plan.get('entry')}")
+    print(f"Primary skill：{plan.get('primary_skill')}")
+    print(f"扫描范围：{plan.get('scan_scope', 'changed')}")
+    print(f"变更文件估计：{plan.get('changed_files')}")
     if plan.get("scan_scope") == "all":
-        print(f"鍊欓€夋枃浠舵€绘暟锛{plan.get('candidate_files')}")
+        print(f"候选文件总数：{plan.get('candidate_files')}")
     batching = plan.get("batching") or {}
     if batching:
         print(
-            "鍒濆鍖栨壒娆★細"
-            + f"raw {batching.get('raw_batches', 0)} 鎵癸紝"
-            + f"quicknote/inbox {batching.get('quicknote_batches', 0)} 鎵癸紝"
+            "初始化批次："
+            + f"raw {batching.get('raw_batches', 0)} 批，"
+            + f"quicknote/inbox {batching.get('quicknote_batches', 0)} 批，"
             + f"本批后剩余 {batching.get('remaining_after_current', 0)} 个输入\n"
         )
-    print(f"璁″垝鍔ㄤ綔锛{len(plan.get('actions', []))}")
+    print(f"计划动作：{len(plan.get('actions', []))}")
     estimated = sum(int(action.get("estimated_inputs", 0)) for action in plan.get("actions", []))
     if estimated:
-        print(f"棰勮澶勭悊杈撳叆锛{estimated}")
-    print(f"浜哄伐纭椤癸細{len(plan.get('manual_review', []))}")
+        print(f"预计处理输入：{estimated}")
+    print(f"人工确认项：{len(plan.get('manual_review', []))}")
     quality = plan.get("plan_quality") or {}
     if quality.get("duplicate_targets"):
-        print(f"閲嶅鐩爣璺緞锛{len(quality.get('duplicate_targets', {}))}")
+        print(f"重复目标路径：{len(quality.get('duplicate_targets', {}))}")
     blocked = quality.get("blocked_placeholder_pages") or []
     if blocked:
-        print(f"mock/鍗犱綅椤甸潰锛{len(blocked)}")
+        print(f"mock/占位页面：{len(blocked)}")
     raw_cov = quality.get("raw_coverage") or {}
     if raw_cov.get("raw_total"):
-        print(f"raw 瑕嗙洊锛{raw_cov.get('covered', 0)}/{raw_cov.get('raw_total', 0)}")
+        print(f"raw 覆盖：{raw_cov.get('covered', 0)}/{raw_cov.get('raw_total', 0)}")
     if quality.get("pdf_needs_extraction"):
-        print(f"PDF 寰呮娊鍙栵細{len(quality.get('pdf_needs_extraction', []))}")
+        print(f"PDF 待抽取：{len(quality.get('pdf_needs_extraction', []))}")
     llm = plan.get("llm_runtime")
     if llm:
         mode = "mock" if llm.get("mock") else "provider"
-        print(f"LLM runtime锛{mode}锛宨tems={len(llm.get('items', []))}锛宱k={llm.get('ok')}")
+        print(f"LLM runtime：{mode}，items={len(llm.get('items', []))}，ok={llm.get('ok')}")
     planned = plan.get("planned_pages", [])
     if planned:
-        print(f"璁″垝钀界洏椤甸潰锛{len(planned)}")
-        print(f"搴旂敤鍛戒护锛歱ython scripts\\personal_kb_steward.py apply-plan {path}")
-        # 鈹€鈹€ Plan Diff 棰勮 鈹€鈹€
+        print(f"计划落盘页面：{len(planned)}")
+        print(f"应用命令：python scripts\\personal_kb_steward.py apply-plan {path}")
+        # -- Plan Diff 预览 --
         for pp in planned[:5]:
             print()
-            print("鈹€" * 60)
+            print("─" * 60)
             print(f"  skill: {pp.get('skill', '')}")
-            print(f"  璺緞: {pp.get('target', '')}")
+            print(f"  路径: {pp.get('target', '')}")
             content = pp.get('content', '')
             preview_lines = content.split('\n')[:20]
-            print("  鍓?0琛?")
+            print("  前 20 行:")
             for pline in preview_lines:
                 print(f"    {pline}")
-            print("鈹€" * 60)
+            print("─" * 60)
         if len(planned) > 5:
-            print(f"  ... 杩樻湁 {len(planned) - 5} 涓〉闈㈡湭灞曠ず")
+            print(f"  ... 还有 {len(planned) - 5} 个页面未展示")
     if queued:
-        print(f"宸插啓鍏ヤ汉宸ョ‘璁ら槦鍒楋細{queued}")
+        print(f"已写入人工确认队列：{queued}")
     print(f"当前为 dry-run；{plan.get('apply_instruction')}")
 
 
@@ -1019,13 +1021,13 @@ def command_status(cfg: dict[str, Any]) -> int:
     schema_error = load_processed_index(cfg).get("_schema_error")
     changed = changed_notes(index, state)
     print(f"智能体：{cfg['agent_name_cn']}（{cfg['agent']}）")
-    print(f"鐭ヨ瘑搴擄細{index.root}")
-    print(f"绗旇鏁伴噺锛{len(index.notes)}")
-    print(f"鑷笂娆¤繍琛屽悗鐨勫彉鏇达細{len(changed)}")
-    print(f"Processed index 鏉ユ簮璁板綍锛{len(processed)}")
+    print(f"知识库：{index.root}")
+    print(f"笔记数量：{len(index.notes)}")
+    print(f"自上次运行后的变更：{len(changed)}")
+    print(f"Processed index 来源记录：{len(processed)}")
     if schema_error:
-        print(f"Processed index schema 閿欒锛{schema_error}")
-    print(f"涓婃杩愯锛{state.get('last_run', '浠庢湭杩愯')}")
+        print(f"Processed index schema 错误：{schema_error}")
+    print(f"上次运行：{state.get('last_run', '从未运行')}")
     return 0
 
 
@@ -1042,14 +1044,14 @@ def command_lint(cfg: dict[str, Any], write: bool = False) -> int:
         op["created"].append(report)
         write_run_log(index, cfg, [op], "知识库健康检查")
         save_state(cfg, build_index(cfg), [op])
-        print(f"鎶ュ憡锛{report}")
+        print(f"报告：{report}")
     return 0
 
 
 def command_run(cfg: dict[str, Any], apply: bool = False, use_llm: bool = True, include_all: bool = False) -> int:
     if apply:
         print("安全执行模型已收口：run --apply 不再直接写入知识库。")
-    plan = make_execution_plan(cfg, "姣忔棩鐭ヨ瘑鐢熼暱", scheduled=True, include_all=include_all)
+    plan = make_execution_plan(cfg, "每日知识生长", scheduled=True, include_all=include_all)
     path = write_execution_plan(cfg, plan)
     queued = write_manual_review_queue(cfg, plan)
     print_plan_summary(plan, path, queued)
@@ -1147,8 +1149,8 @@ def resolve_plan_ref(cfg: dict[str, Any], ref: str) -> Path:
     if len(matches) == 1:
         return matches[0].resolve()
     if not matches:
-        raise SystemExit(f"鎵句笉鍒?plan锛{ref}")
-    raise SystemExit(f"plan 寮曠敤涓嶅敮涓€锛{ref}")
+        raise SystemExit(f"找不到 plan：{ref}")
+    raise SystemExit(f"plan 引用不唯一：{ref}")
 
 
 def fail_apply_plan(cfg: dict[str, Any], run_id_value: str, plan_path: Path | None, root: Path | None, created: list[dict[str, Any]], exc: BaseException) -> None:
@@ -1174,19 +1176,19 @@ def fail_apply_plan(cfg: dict[str, Any], run_id_value: str, plan_path: Path | No
         "next_step": user_next_step(exc),
         "manifest_path": str(manifest_path),
     })
-    print(f"apply-plan 澶辫触锛{exc}", file=sys.stderr)
-    print(f"涓嬩竴姝ワ細{user_next_step(exc)}", file=sys.stderr)
+    print(f"apply-plan 失败：{exc}", file=sys.stderr)
+    print(f"下一步：{user_next_step(exc)}", file=sys.stderr)
     print(recovery_hint(cfg, run_id_value), file=sys.stderr)
-    print(f"澶辫触 run manifest锛{manifest_path}", file=sys.stderr)
+    print(f"失败 run manifest：{manifest_path}", file=sys.stderr)
 
 
 def assert_safe_rel_write(cfg: dict[str, Any], rel_path: str) -> None:
     rel = Path(rel_path)
     if rel.is_absolute() or ".." in rel.parts:
-        raise SystemExit(f"鎷掔粷涓嶅畨鍏ㄧ洰鏍囪矾寰勶細{rel_path}")
+        raise SystemExit(f"拒绝不安全目标路径：{rel_path}")
     first = rel.parts[0] if rel.parts else ""
     if first in set(cfg.get("safety", {}).get("protected_dirs", [])):
-        raise SystemExit(f"鎷掔粷鍐欏叆鍙椾繚鎶ょ洰褰曪細{rel_path}")
+        raise SystemExit(f"拒绝写入受保护目录：{rel_path}")
 
 
 def page_requires_manual_review(page: dict[str, Any]) -> bool:
@@ -1200,8 +1202,8 @@ BLOCKED_APPLY_MARKERS = (
     "Mock stub content",
 )
 BLOCKED_HEURISTIC_MARKERS = (
-    "鍒嗘瀽妯″紡锛歨euristic",
-    "鍒嗘瀽妯″紡锛歨euristic-fallback",
+    "分析模式：heuristic",
+    "分析模式：heuristic-fallback",
 )
 def page_has_blocked_placeholder(page: dict[str, Any]) -> bool:
     content = str(page.get("content") or "")
@@ -1228,39 +1230,39 @@ def preflight_apply_pages(
     duplicates = duplicate_page_targets(pages)
     if duplicates:
         details = ", ".join(f"{rel} x{count}" for rel, count in sorted(duplicates.items())[:10])
-        raise SystemExit(f"plan 鍐呭瓨鍦ㄩ噸澶嶇洰鏍囪矾寰勶紝鎷掔粷 apply-plan锛{details}")
+        raise SystemExit(f"plan 内存在重复目标路径，拒绝 apply-plan：{details}")
     for page in pages:
         rel_path = page.get("rel_path")
         if not rel_path:
             raise SystemExit("plan 页面缺少 rel_path，不能安全写入。")
         if page_has_blocked_placeholder(page):
-            raise SystemExit(f"plan 椤甸潰鍖呭惈 mock 鎴栧急鍗犱綅鍐呭锛屾嫆缁?apply-plan锛{rel_path}")
+            raise SystemExit(f"plan 页面包含 mock 或弱占位内容，拒绝 apply-plan：{rel_path}")
         if page_requires_manual_review(page) and not allow_reviewed:
-            raise SystemExit(f"plan 椤甸潰闇€瑕佷汉宸ュ鏍革紝鎷掔粷鐩存帴 apply-plan锛{rel_path}")
+            raise SystemExit(f"plan 页面需要人工审核，拒绝直接 apply-plan：{rel_path}")
         assert_safe_rel_write(cfg, rel_path)
         target = (root / rel_path).resolve()
         try:
             target.relative_to(root)
         except ValueError:
-            raise SystemExit(f"鎷掔粷瓒婄晫鍐欏叆锛{target}")
+            raise SystemExit(f"拒绝越界写入：{target}")
         operation = str(page.get("operation") or "create")
         if operation == "update" and not target.exists():
-            raise SystemExit(f"鏇存柊鐩爣涓嶅瓨鍦紝鎷掔粷 apply-plan锛{rel_path}")
+            raise SystemExit(f"更新目标不存在，拒绝 apply-plan：{rel_path}")
         if operation != "update" and target.exists():
-            raise SystemExit(f"鐩爣宸插瓨鍦紝鎷掔粷瑕嗙洊锛{rel_path}")
+            raise SystemExit(f"目标已存在，拒绝覆盖：{rel_path}")
         content = page.get("content")
         content_hash = page.get("content_sha256")
         if not isinstance(content, str) or not content_hash:
-            raise SystemExit(f"plan 椤甸潰缂哄皯 content 鎴?content_sha256锛{rel_path}")
+            raise SystemExit(f"plan 页面缺少 content 或 content_sha256：{rel_path}")
         if sha256_text(content) != content_hash:
-            raise SystemExit(f"plan 鍐呭 hash 涓嶅尮閰嶏細{rel_path}")
+            raise SystemExit(f"plan 内容 hash 不匹配：{rel_path}")
         parent = target.parent
         if parent.exists():
             probe = parent / f".write-check-{run_id()}.tmp"
             try:
                 probe.write_text("ok", encoding="utf-8")
             except OSError as exc:
-                raise PermissionError(f"鐩爣鐩綍涓嶅彲鍐欙細{parent}") from exc
+                raise PermissionError(f"目标目录不可写：{parent}") from exc
             finally:
                 try:
                     if probe.exists():
@@ -1363,7 +1365,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
 
         reconcile = reconcile_created_pages(root, created)
         if not reconcile["ok"]:
-            raise SystemExit(f"apply-plan 钀界洏鏍￠獙澶辫触锛{json.dumps(reconcile, ensure_ascii=False)}")
+            raise SystemExit(f"apply-plan 落盘校验失败：{json.dumps(reconcile, ensure_ascii=False)}")
 
         index = build_index(cfg)
         operations_by_skill: dict[str, dict[str, Any]] = {}
@@ -1415,14 +1417,14 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
         })
         created_count = sum(1 for item in created if item.get("operation") != "update")
         updated_count = sum(1 for item in created if item.get("operation") == "update")
-        print(f"宸插簲鐢?plan锛{plan_path}")
-        print(f"鍐欏叆椤甸潰锛{len(created)}锛屾柊寤猴細{created_count}锛屾洿鏂帮細{updated_count}")
+        print(f"已应用 plan：{plan_path}")
+        print(f"写入页面：{len(created)}，新建：{created_count}，更新：{updated_count}")
         if skipped_existing:
-            print(f"璺宠繃宸插瓨鍦ㄩ〉闈細{len(skipped_existing)}")
-        print(f"run manifest锛{manifest_path}")
-        print(f"澶囦唤鐩綍锛{backup_root(cfg) / apply_run_id}")
-        print(f"鎿嶄綔鏃ュ織锛{operation_log_path(cfg)}")
-        print(f"鍥炴粴鍛戒护锛歱ython scripts\\personal_kb_steward.py rollback {apply_run_id}")
+            print(f"跳过已存在页面：{len(skipped_existing)}")
+        print(f"run manifest：{manifest_path}")
+        print(f"备份目录：{backup_root(cfg) / apply_run_id}")
+        print(f"操作日志：{operation_log_path(cfg)}")
+        print(f"回滚命令：python scripts\\personal_kb_steward.py rollback {apply_run_id}")
         return 0
     except (Exception, SystemExit) as exc:
         failed_run_id = str(locals().get("apply_run_id") or Path(ref).stem or "apply-plan-error")
@@ -1441,13 +1443,13 @@ def resolve_run_manifest(cfg: dict[str, Any], ref: str) -> Path:
     if len(matches) == 1:
         return matches[0].resolve()
     if not matches:
-        raise SystemExit(f"鎵句笉鍒?run manifest锛{ref}")
-    raise SystemExit(f"run 寮曠敤涓嶅敮涓€锛{ref}")
-
+        raise SystemExit(f"找不到 run manifest：{ref}")
+    raise SystemExit(f"run 引用不唯一：{ref}")
 
 def command_rollback(cfg: dict[str, Any], ref: str) -> int:
     manifest_path = resolve_run_manifest(cfg, ref)
     manifest = read_json(manifest_path, {})
+    require_delete_only_rollback(manifest)
     root = kb_root(cfg)
     rollback_run_id = f"rollback-{manifest.get('run_id') or run_id()}"
     cfg["_run_id"] = rollback_run_id
@@ -1464,10 +1466,10 @@ def command_rollback(cfg: dict[str, Any], ref: str) -> int:
         assert_safe_rel_write(cfg, rel_path)
         target = (root / rel_path).resolve()
         if not target.exists():
-            skipped.append(f"涓嶅瓨鍦細{rel_path}")
+            skipped.append(f"不存在：{rel_path}")
             continue
         if sha256_file(target) != item.get("sha256"):
-            skipped.append(f"hash 宸插彉鍖栵紝璺宠繃锛{rel_path}")
+            skipped.append(f"hash 已变化，跳过：{rel_path}")
             continue
         safe_delete_file(
             cfg,
@@ -1491,16 +1493,15 @@ def command_rollback(cfg: dict[str, Any], ref: str) -> int:
         "removed": removed,
         "skipped": skipped,
     })
-    print(f"宸插洖婊?run锛{manifest.get('run_id')}")
-    print(f"鍒犻櫎椤甸潰锛{len(removed)}")
-    print(f"鍒犻櫎鍓嶅浠界洰褰曪細{backup_root(cfg) / rollback_run_id}")
-    print(f"鎿嶄綔鏃ュ織锛{operation_log_path(cfg)}")
+    print(f"已回滚 run：{manifest.get('run_id')}")
+    print(f"删除页面：{len(removed)}")
+    print(f"删除前备份目录：{backup_root(cfg) / rollback_run_id}")
+    print(f"操作日志：{operation_log_path(cfg)}")
     if skipped:
         print("跳过：")
         for item in skipped:
             print(f"- {item}")
     return 0
-
 
 def command_review(cfg: dict[str, Any], args: Any) -> int:
     target = review_queue_path(cfg)
@@ -1516,10 +1517,10 @@ def command_review(cfg: dict[str, Any], args: Any) -> int:
             filtered = filter_items(filtered, item_type=type_filter)
         if risk_filter:
             filtered = filter_items(filtered, risk=risk_filter)
-        print(f"浜哄伐纭闃熷垪锛{target}")
+        print(f"人工确认队列：{target}")
         print(format_queue_summary(items))
         if not filtered:
-            print("  (鏃犲尮閰嶈褰?")
+            print("  (无匹配记录)")
             return 0
         print()
         for i, item in enumerate(filtered, 1):
@@ -1529,7 +1530,7 @@ def command_review(cfg: dict[str, Any], args: Any) -> int:
     elif sub == "show":
         item = find_item(items, args.id)
         if not item:
-            print(f"鏈壘鍒?ID锛{args.id}")
+            print(f"未找到 ID：{args.id}")
             return 1
         print(format_show_item(item))
         return 0
@@ -1538,18 +1539,18 @@ def command_review(cfg: dict[str, Any], args: Any) -> int:
         reason = getattr(args, "reason", "") or ""
         if approve_item(items, args.id, reason):
             save_queue(target, items)
-            print(f"宸叉壒鍑嗭細{args.id}")
+            print(f"已批准：{args.id}")
             return 0
-        print(f"鏈壘鍒板緟纭椤癸細{args.id}")
+        print(f"未找到待确认项：{args.id}")
         return 1
 
     elif sub == "reject":
         reason = getattr(args, "reason", "") or ""
         if reject_item(items, args.id, reason):
             save_queue(target, items)
-            print(f"宸叉嫆缁濓細{args.id}")
+            print(f"已拒绝：{args.id}")
             return 0
-        print(f"鏈壘鍒板緟纭椤癸細{args.id}")
+        print(f"未找到待确认项：{args.id}")
         return 1
 
     elif sub == "batch-approve":
@@ -1591,7 +1592,7 @@ def command_review(cfg: dict[str, Any], args: Any) -> int:
         return 0 if applied else 1
 
     else:
-        print(f"鏈煡 review 瀛愬懡浠わ細{sub}")
+        print(f"未知 review 子命令：{sub}")
         return 2
 
 
@@ -1603,8 +1604,8 @@ def command_processed(cfg: dict[str, Any]) -> int:
     for record in processed.values():
         for skill in record.get("skills", {}):
             skill_counts[skill] += 1
-    print(f"Processed index锛{target}")
-    print(f"鏉ユ簮璁板綍锛{len(processed)}")
+    print(f"Processed index：{target}")
+    print(f"来源记录：{len(processed)}")
     if not skill_counts:
         print("暂无已处理记录。")
         return 0
@@ -1618,49 +1619,49 @@ def main(argv: list[str]) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
     run_parser = sub.add_parser("run")
-    run_parser.add_argument("--apply", action="store_true", help="鎵ц鍐欏叆锛涢粯璁ゅ彧鐢熸垚 dry-run plan")
-    run_parser.add_argument("--all", action="store_true", help="鍒濆鏁寸悊妯″紡锛氭壂鎻忓叏閮ㄧ瑪璁帮紝鑰屼笉鍙湅鏈疆鍙樻洿")
+    run_parser.add_argument("--apply", action="store_true", help="执行写入；默认只生成 dry-run plan")
+    run_parser.add_argument("--all", action="store_true", help="初始整理模式：扫描全部笔记，而不只看本轮变更")
     sub.add_parser("lint")
     health = sub.add_parser("healthcheck")
     health.add_argument("--write", action="store_true", help="写入健康检查报告")
     plan = sub.add_parser("plan")
-    plan.add_argument("--llm", action="store_true", help="鍔犺浇 SKILL.md 骞惰皟鐢?LLM Skill Runtime")
-    plan.add_argument("--mock-llm", action="store_true", help="浣跨敤 mock LLM 杩愯 Skill Runtime")
-    plan.add_argument("--all", action="store_true", help="鍒濆鏁寸悊妯″紡锛氭壂鎻忓叏閮ㄧ瑪璁帮紝鑰屼笉鍙湅鏈疆鍙樻洿")
+    plan.add_argument("--llm", action="store_true", help="加载 SKILL.md 并调用 LLM Skill Runtime")
+    plan.add_argument("--mock-llm", action="store_true", help="使用 mock LLM 运行 Skill Runtime")
+    plan.add_argument("--all", action="store_true", help="初始整理模式：扫描全部笔记，而不只看本轮变更")
     plan.add_argument("text", nargs="+")
     task = sub.add_parser("task")
-    task.add_argument("--apply", action="store_true", help="鎵ц鍐欏叆锛涢粯璁ゅ彧鐢熸垚 dry-run plan")
-    task.add_argument("--llm", action="store_true", help="鍔犺浇 SKILL.md 骞惰皟鐢?LLM Skill Runtime锛涗粎 dry-run plan 鐢熸晥")
-    task.add_argument("--mock-llm", action="store_true", help="浣跨敤 mock LLM 杩愯 Skill Runtime锛涗粎 dry-run plan 鐢熸晥")
-    task.add_argument("--all", action="store_true", help="鍒濆鏁寸悊妯″紡锛氭壂鎻忓叏閮ㄧ瑪璁帮紝鑰屼笉鍙湅鏈疆鍙樻洿")
+    task.add_argument("--apply", action="store_true", help="执行写入；默认只生成 dry-run plan")
+    task.add_argument("--llm", action="store_true", help="加载 SKILL.md 并调用 LLM Skill Runtime；仅 dry-run plan 生效")
+    task.add_argument("--mock-llm", action="store_true", help="使用 mock LLM 运行 Skill Runtime；仅 dry-run plan 生效")
+    task.add_argument("--all", action="store_true", help="初始整理模式：扫描全部笔记，而不只看本轮变更")
     task.add_argument("text", nargs="+")
-    init_kb = sub.add_parser("init-kb", help="鍒嗘壒鍒濆鍖栫煡璇嗗簱锛岀敓鎴?pipeline plan")
-    init_kb.add_argument("--batch-size", type=int, default=6, help="姣忔壒 raw 闀挎枃鏁伴噺锛岄粯璁?6")
+    init_kb = sub.add_parser("init-kb", help="分批初始化知识库，生成 pipeline plan")
+    init_kb.add_argument("--batch-size", type=int, default=6, help="每批 raw 长文数量，默认 6")
     init_kb.add_argument("--no-llm", action="store_true", help="不调用 LLM，使用启发式整理并标记质量风险")
-    init_kb.add_argument("--apply", action="store_true", help="鎸夋壒娆＄敓鎴愬苟搴旂敤鍒濆鍖栬鍒掞紝鐩村埌鏃犳柊澧為〉鎴栬揪鍒版壒娆℃暟涓婇檺")
-    init_kb.add_argument("--max-batches", type=int, default=20, help="--apply 鏈€澶氳繛缁鐞嗙殑鎵规鏁帮紝榛樿 20")
-    finalize = sub.add_parser("finalize-kb", help="璺?source-note 鑱氬悎骞惰ˉ related 閾炬帴")
-    finalize.add_argument("--apply", action="store_true", help="搴旂敤 finalize 璁″垝")
+    init_kb.add_argument("--apply", action="store_true", help="按批次生成并应用初始化计划，直到无新增页或达到批次数上限")
+    init_kb.add_argument("--max-batches", type=int, default=20, help="--apply 最多连续处理的批次数，默认 20")
+    finalize = sub.add_parser("finalize-kb", help="跨 source-note 聚合并补 related 链接")
+    finalize.add_argument("--apply", action="store_true", help="应用 finalize 计划")
     apply_plan = sub.add_parser("apply-plan")
-    apply_plan.add_argument("ref", help="plan 鏂囦欢璺緞銆乺un_id 鎴栧敮涓€鐗囨")
+    apply_plan.add_argument("ref", help="plan 文件路径、run_id 或唯一片段")
     rollback = sub.add_parser("rollback")
-    rollback.add_argument("ref", help="run manifest 璺緞銆乺un_id 鎴栧敮涓€鐗囨")
-    # 鈹€鈹€ review 瀛愬懡浠ょ粍 鈹€鈹€
-    review_parser = sub.add_parser("review", help="浜哄伐纭闃熷垪绠＄悊")
+    rollback.add_argument("ref", help="run manifest 路径、run_id 或唯一片段")
+    # -- review 子命令组 --
+    review_parser = sub.add_parser("review", help="人工确认队列管理")
     review_sub = review_parser.add_subparsers(dest="review_command")
-    review_list = review_sub.add_parser("list", help="鍒楀嚭闃熷垪")
-    review_list.add_argument("--all", action="store_true", help="鏄剧ず鎵€鏈夌姸鎬侊紙鍖呮嫭宸插鐞嗭級")
+    review_list = review_sub.add_parser("list", help="列出队列")
+    review_list.add_argument("--all", action="store_true", help="显示所有状态（包括已处理）")
     review_list.add_argument("--type", help="按类型过滤")
     review_list.add_argument("--risk", help="按风险等级过滤（P0/P1/P2/P3）")
-    review_show = review_sub.add_parser("show", help="鏄剧ず鍗曟潯璇︽儏")
-    review_show.add_argument("id", help="璁板綍 ID 鎴栧墠缂€")
-    review_approve = review_sub.add_parser("approve", help="鎵瑰噯璁板綍")
-    review_approve.add_argument("id", help="璁板綍 ID 鎴栧墠缂€")
-    review_approve.add_argument("--reason", default="", help="鎵瑰噯鐞嗙敱")
-    review_reject = review_sub.add_parser("reject", help="鎷掔粷璁板綍")
-    review_reject.add_argument("id", help="璁板綍 ID 鎴栧墠缂€")
-    review_reject.add_argument("--reason", default="", help="鎷掔粷鐞嗙敱")
-    review_batch = review_sub.add_parser("batch-approve", help="鎵归噺鎵瑰噯")
+    review_show = review_sub.add_parser("show", help="显示单条详情")
+    review_show.add_argument("id", help="记录 ID 或前缀")
+    review_approve = review_sub.add_parser("approve", help="批准记录")
+    review_approve.add_argument("id", help="记录 ID 或前缀")
+    review_approve.add_argument("--reason", default="", help="批准理由")
+    review_reject = review_sub.add_parser("reject", help="拒绝记录")
+    review_reject.add_argument("id", help="记录 ID 或前缀")
+    review_reject.add_argument("--reason", default="", help="拒绝理由")
+    review_batch = review_sub.add_parser("batch-approve", help="批量批准")
     review_batch.add_argument("--risk", help="只批准指定风险等级")
     review_batch.add_argument("--type", help="只批准指定类型")
     review_apply = review_sub.add_parser("apply-approved", help="执行所有已批准项")

@@ -14,7 +14,7 @@ from core.vault import build_index  # noqa: E402
 
 class SourceTraceabilityTests(unittest.TestCase):
     def make_cfg(self, kb: Path) -> dict:
-        cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+        cfg = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8-sig"))
         cfg["knowledge_base"] = str(kb)
         cfg["state_file"] = str(kb / ".state.json")
         cfg["safety"]["plans_dir"] = str(kb / ".openclaw" / "plans")
@@ -57,10 +57,10 @@ class SourceTraceabilityTests(unittest.TestCase):
                 "---\n"
                 "title: Source A\n"
                 "type: source-note\n"
-                "status: active\n"
-                "stage: compiled\n"
+                "status: growing\n"
+                "stage: active\n"
                 "sources: [\"raw/a.md\"]\n"
-                "confidence: high\n"
+                "confidence: low\n"
                 "---\n"
                 "# Source A\n\nMock summary for dry-run.\n",
                 encoding="utf-8",
@@ -77,6 +77,7 @@ class SourceTraceabilityTests(unittest.TestCase):
             p1_kinds = {item["kind"] for item in lint["risk_buckets"]["P1"]}
             self.assertIn("mock_content_applied", p0_kinds)
             self.assertIn("raw_coverage_missing", p1_kinds)
+            self.assertIn("low_confidence_marked_active", p1_kinds)
 
     def test_healthcheck_reports_processed_index_schema_error(self):
         with tempfile.TemporaryDirectory() as tmp:

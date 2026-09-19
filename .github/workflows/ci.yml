@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "agent/**"
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Verify exact checkout and committed differences
+        run: python scripts/check_committed_diff.py
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Check syntax
+        shell: python
+        run: |
+          import subprocess, sys
+          subprocess.run([sys.executable, '-m', 'compileall', '-q', 'core', 'scripts', 'tests'], check=True)
+
+      - name: Run full tests without local config
+        shell: python
+        run: |
+          import subprocess, sys
+          from pathlib import Path
+          assert not Path('config.json').exists()
+          subprocess.run([sys.executable, '-m', 'pytest', '-q'], check=True)
+          assert not Path('config.json').exists()
+
+      - name: Validate example configuration separately
+        shell: python
+        run: |
+          import shutil, subprocess, sys
+          shutil.copyfile('config.example.json', 'config.json')
+          subprocess.run([sys.executable, 'scripts/validate_config.py'], check=True)

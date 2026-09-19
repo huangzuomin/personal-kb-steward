@@ -49,7 +49,10 @@ def expand_path_expr(value: str, *, kb_home: str | None = None) -> str:
 
 
 def resolve_path(value: str, *, base: Path = ROOT, kb_home: str | None = None) -> Path:
-    path = Path(expand_path_expr(value, kb_home=kb_home))
+    expanded = expand_path_expr(value, kb_home=kb_home)
+    if os.sep == "/":
+        expanded = expanded.replace("\\", "/")
+    path = Path(expanded)
     if not path.is_absolute():
         path = base / path
     return path.resolve()
