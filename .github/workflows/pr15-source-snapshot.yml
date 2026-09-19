@@ -1,0 +1,22 @@
+name: PR15 validation snapshot
+on:
+  push:
+    branches: ["chore/pr15-validation-snapshot"]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f829f283f74742e7c6a4b27f88176a7d79b2fd63
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git bundle create "$RUNNER_TEMP/pr15-source.bundle" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr15-source-f829f283
+          path: ${{ runner.temp }}/pr15-source.bundle
+          retention-days: 1
