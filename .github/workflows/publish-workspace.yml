@@ -1,0 +1,57 @@
+name: Validate workspace pilot patch
+on:
+  push:
+    branches: ["transport/obsidian-workspace-source"]
+    paths: [".github/workspace.patch.gz", ".github/workflows/publish-workspace.yml"]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply reviewed patch to pinned base
+        shell: python
+        run: |
+          import gzip, hashlib, os, subprocess
+          from pathlib import Path
+          patch = gzip.decompress(Path('.github/workspace.patch.gz').read_bytes())
+          assert hashlib.sha256(patch).hexdigest() == '19fa3415e103a0ef152bdcdbcd426f2f6adb571681d8dc454982576c859aff88'
+          path = Path(os.environ['RUNNER_TEMP']) / 'workspace.patch'
+          path.write_bytes(patch)
+          subprocess.run(['git', 'checkout', '--detach', '3e348efc03af7e56f3e9b638a9ea9b9ab90d1630'], check=True)
+          subprocess.run(['git', 'apply', '--check', str(path)], check=True)
+          subprocess.run(['git', 'apply', str(path)], check=True)
+      - run: python -m pip install -r requirements.txt
+      - name: Validate clean configuration boundary and full tests
+        shell: python
+        run: |
+          import shutil, subprocess, sys
+          from pathlib import Path
+          assert not Path('config.json').exists()
+          subprocess.run([sys.executable, '-m', 'compileall', '-q', 'core', 'scripts', 'tests'], check=True)
+          subprocess.run([sys.executable, '-m', 'pytest', '-q'], check=True)
+          assert not Path('config.json').exists()
+          shutil.copyfile('config.example.json', 'config.json')
+          subprocess.run([sys.executable, 'scripts/validate_config.py'], check=True)
+      - name: Publish only the pilot files, not transport content
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/agent/obsidian-workspace | cut -f1)" = '3e348efc03af7e56f3e9b638a9ea9b9ab90d1630'
+          git add -- README.md integrations/obsidian scripts/workspace_report.py tests/test_obsidian_workspace.py
+          git diff --cached --check
+          test "$(git write-tree)" = '20b32162a5fffdee456c53f4d817e73b3c743a80'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: add isolated Obsidian workspace pilot and read-only review report'
+          git push origin HEAD:refs/heads/agent/obsidian-workspace
