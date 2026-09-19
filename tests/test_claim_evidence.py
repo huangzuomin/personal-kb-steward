@@ -30,12 +30,14 @@ def state_of(content):
 
 
 def test_claim_evidence_roundtrip_audit_and_readonly_inspection(vault, capsys):
+    source = vault.root / "raw/a.md"
+    source.write_bytes(b"# Source\r\n\r\nAn evidence record.")
     first = proposal(vault)
     record = state_of(first["planned_pages"][0]["content"])["claims"][0]
     evidence = record["evidence"][0]
     assert evidence["start_line"] == evidence["end_line"] == 3
     assert evidence["quote_sha256"] == digest("An evidence record.")
-    assert evidence["source_sha256"] == digest((vault.root / "raw/a.md").read_text())
+    assert evidence["source_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
     review_apply(vault, first)
     page = first["planned_pages"][0]
     audit = json.loads((vault.root / ".openclaw/runs/claim-test.json").read_text())
