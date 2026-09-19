@@ -1,0 +1,23 @@
+name: Isolated workspace source
+on:
+  push:
+    branches: ["transport/obsidian-workspace-source"]
+    paths: [".github/workflows/workspace-source.yml"]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3e348efc03af7e56f3e9b638a9ea9b9ab90d1630
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git bundle create "$RUNNER_TEMP/steward-source.bundle" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-source-3e348efc
+          path: ${{ runner.temp }}/steward-source.bundle
+          retention-days: 1
