@@ -78,6 +78,9 @@ def bind_plan_objects(index: VaultIndex, plan: dict[str, Any]) -> None:
 Legacy pages are adopted only when an explicit update is planned. Re-saving an
 already bound plan never increments revisions, changes IDs, or re-bases hashes.
     """
+    from .retrieval import validate_retrieval_page
+    for page in plan.get("planned_pages", []):
+        validate_retrieval_page(index, page)
     if plan.get("primary_skill") == "kb-reconcile" or "reconcile" in plan:
         from .reconcile import validate_reconcile_plan
         validate_reconcile_plan(index, plan)
@@ -130,8 +133,10 @@ object's ID. This is preflight validation, not a multi-file atomic transaction.
         raise ObjectIdentityError(f"Unsupported object_schema_version: {schema_version}")
     if any(is_knowledge_path(str(page.get("rel_path") or "")) for page in pages):
         index.objects.require_valid()
+    from .retrieval import validate_retrieval_page
     seen: dict[str, str] = {}
     for page in pages:
+        validate_retrieval_page(index, page)
         if page.get("skill") == "kb-reconcile":
             from .reconcile import validate_reconcile_page
             validate_reconcile_page(index, page)

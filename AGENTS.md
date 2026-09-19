@@ -208,3 +208,10 @@ python scripts\personal_kb_steward.py processed
 `kb_index.py impact/stale` 只读追踪明确的来源依赖。先处理 blocked_by 中的上游，
 再通过 Reconcile 提案、审核、apply 更新原页，完成后 rebuild 并重新检查。
 不要把 stale 当成事实已错误，也不要把无版本来源当作已验证新鲜。见 `docs/dependency-stale.md`。
+
+## Agent 选材
+
+查询型任务统一使用 `core.retrieval.Retriever`，不要另开旧字符串打分链路。
+依赖状态 `stale/unversioned/unchecked` 必须保留在输入与提案中，不宣称已核实。
+`retrieval_source_hashes` 由读取快照产生，保存或 apply 时不得用较新版本重绑。
+不自动建库、修复旧来源或扩展读取范围；见 `docs/retrieval-integration.md`。

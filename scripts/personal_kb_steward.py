@@ -60,6 +60,7 @@ from core.config import (
     write_json,
 )
 from core.vault import Note, VaultIndex, build_index
+from core.retrieval import Retriever, annotate_pages, query_terms as retrieval_terms
 from core.state import (
     changed_notes,
     load_processed_index,
@@ -310,9 +311,12 @@ def mvp_executor_plan(
     plan_run_id: str,
     *,
     use_llm: bool = False,
+    retriever: Retriever | None = None,
 ) -> dict[str, Any] | None:
     if skill not in MVP_EXECUTOR_SKILLS:
         return None
+    selection = None
+    retriever = retriever or Retriever(cfg, index)
     if skill == "mindseed-grow":
         candidates_all = [
             n for n in changed
@@ -325,10 +329,12 @@ def mvp_executor_plan(
         notes = unprocessed_notes(processed_index, candidates_all, skill)[: cfg["scan"]["max_files_per_run"]]
         context = {"config": cfg, "notes": executor_notes(notes), "use_llm": use_llm}
     elif skill == "topic-insight-miner":
-        notes = select_notes(index, task, limit=8, prefixes=("wiki/seeds/", "wiki/topics/", "raw/"))
+        selection = retriever.select(task, limit=8, prefixes=("wiki/seeds/", "wiki/topics/", "wiki/sources/", "raw/"))
+        notes = selection.notes
         context = {"config": cfg, "query": task, "notes": executor_notes(notes)}
     else:
-        notes = select_notes(index, task, limit=12)
+        selection = retriever.select(task, limit=12)
+        notes = selection.notes
         items = evidence_items(notes, task)
         context = {
             "config": cfg,
@@ -338,13 +344,21 @@ def mvp_executor_plan(
             "timeline": sorted({d for n in notes for d in extract_dates(n.body)}),
             "related": [],
         }
+    if selection:
+        context["retrieval"] = selection.report
+        for note in context["notes"]:
+            note["retrieval"] = retriever.hits[note["rel"]]
     result = execute_skill(ROOT, skill, context)
+    pages = planned_pages_from_executor_result(cfg, result, plan_run_id)
+    if selection:
+        annotate_pages(pages, selection)
     return {
         "skill": skill,
         "inputs": result.get("inputs", []),
         "processed": result.get("processed", 0),
         "issues": result.get("issues", []),
-        "planned_pages": planned_pages_from_executor_result(cfg, result, plan_run_id),
+        "planned_pages": pages,
+        "retrieval": selection.report if selection else None,
     }
 def select_llm_input_notes(
     index: VaultIndex,
@@ -353,6 +367,7 @@ def select_llm_input_notes(
     skill: str,
     changed: list[Note],
     processed_index: dict[str, Any],
+    retriever: Retriever | None = None,
 ) -> list[Note]:
     if skill == "mindseed-grow":
         candidates = [
@@ -363,11 +378,12 @@ def select_llm_input_notes(
     if skill == "work-memory-weave":
         candidates = [n for n in changed if n.rel.startswith(("quicknote/", "inbox/")) and work_memory_candidate(n)]
         return unprocessed_notes(processed_index, candidates, skill)[:5]
+    retriever = retriever or Retriever(cfg, index)
     if skill == "topic-insight-miner":
-        return select_notes(index, task, limit=8, prefixes=("wiki/seeds/", "wiki/topics/", "wiki/sources/", "wiki/work-memory/", "raw/"))
+        return retriever.select(task, limit=8, prefixes=("wiki/seeds/", "wiki/topics/", "wiki/sources/", "wiki/work-memory/", "raw/")).notes
     if skill == "writing-material-pack":
-        return select_notes(index, task, limit=8, prefixes=("wiki/topics/", "wiki/evidence/", "wiki/gaps/", "wiki/claim-checks/", "wiki/seeds/", "raw/"))
-    return select_notes(index, task, limit=6)
+        return retriever.select(task, limit=8, prefixes=("wiki/topics/", "wiki/sources/", "wiki/evidence/", "wiki/gaps/", "wiki/claim-checks/", "wiki/seeds/", "raw/")).notes
+    return retriever.select(task, limit=6).notes
 def unique_path(path: Path) -> Path:
     if not path.exists():
         return path
@@ -582,8 +598,19 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
         "orphans": orphans[:100],
         "backlog": backlog,
     }
+def extract_dates(text: str) -> list[str]:
+    """Extract explicit, valid calendar dates only; never infer a missing date."""
+    dates = set()
+    for year, month, day in re.findall(r"(?<!\d)(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})(?!\d)", text):
+        try:
+            dates.add(dt.date(int(year), int(month), int(day)).isoformat())
+        except ValueError:
+            continue
+    return sorted(dates)
+
+
 def evidence_items(notes: list[Note], query: str) -> list[dict[str, str]]:
-    query_terms = tokens(query)
+    query_terms = retrieval_terms(query)
     items = []
     for note in notes:
         lines = []
@@ -664,6 +691,7 @@ def make_execution_plan(
 ) -> dict[str, Any]:
     plan_run_id = run_id()
     index = build_index(cfg)
+    retriever = Retriever(cfg, index)
     state = load_state(cfg)
     changed = changed_notes(index, state)
     input_scope = index.notes if include_all else changed
@@ -798,6 +826,7 @@ def make_execution_plan(
         processed_index,
         plan_run_id,
         use_llm=use_llm and not mock_llm,
+        retriever=retriever,
     ) if not scheduled else None
     if plan_executor_result:
         planned_pages = plan_executor_result.get("planned_pages", [])
@@ -871,8 +900,9 @@ def make_execution_plan(
 
     llm_result: dict[str, Any] | None = None
     if use_llm and not scheduled:
-        input_notes = select_llm_input_notes(index, cfg, task, primary_skill, input_scope, processed_index)
-        docs = llm_documents(input_notes, int(cfg["scan"].get("max_source_chars", 6000)))
+        input_notes = select_llm_input_notes(index, cfg, task, primary_skill, input_scope, processed_index, retriever)
+        document_builder = retriever.documents if retriever.history else llm_documents
+        docs = document_builder(input_notes, int(cfg["scan"].get("max_source_chars", 6000)))
         llm_result = run_skill_runtime(ROOT, cfg, primary_skill, task, docs, mock=mock_llm)
         for action in actions:
             if action.get("operation") == "run_primary_skill":
@@ -914,6 +944,7 @@ def make_execution_plan(
             "raw_coverage": planned_raw_coverage([n.rel for n in raw_inputs], planned_pages),
         },
         "llm_runtime": llm_result,
+        "retrieval": retriever.history,
         "manual_review": manual_review,
         "apply_instruction": "请审阅 plan；无人工审核项时运行 apply-plan，有人工审核项时先 review approve 再运行 review apply-approved。",
     }
@@ -923,6 +954,12 @@ def print_plan_summary(plan: dict[str, Any], path: Path, queued: int) -> None:
     print(f"计划文件：{path}")
     print(f"入口：{plan.get('entry')}")
     print(f"Primary skill：{plan.get('primary_skill')}")
+    for retrieval in plan.get("retrieval", []):
+        print(f"检索：{retrieval['engine']}，选中 {len(retrieval['hits'])} 页")
+        if retrieval.get("fallback_reason"):
+            print(retrieval["fallback_reason"])
+        if retrieval.get("requires_review"):
+            print("检索材料包含需复查的依据，详见计划 retrieval 字段。")
     print(f"扫描范围：{plan.get('scan_scope', 'changed')}")
     print(f"变更文件估计：{plan.get('changed_files')}")
     if plan.get("scan_scope") == "all":

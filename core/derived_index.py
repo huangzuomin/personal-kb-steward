@@ -332,7 +332,7 @@ def show(cfg: dict[str, Any], target: str) -> dict:
 
 
 def search(cfg: dict[str, Any], query: str, *, kind: str = "note", note_type: str | None = None,
-           note_status: str | None = None, limit: int = 10) -> dict:
+           note_status: str | None = None, limit: int = 10, prefixes: tuple[str, ...] | None = None) -> dict:
     """Plain whitespace-separated terms ANDed as literals, never raw SQL/FTS syntax."""
     if not isinstance(query, str) or not query.strip() or len(query) > 200 or "\x00" in query:
         raise DerivedIndexError("查询须为 1 至 200 字符的非空文本")
@@ -354,6 +354,12 @@ def search(cfg: dict[str, Any], query: str, *, kind: str = "note", note_type: st
         if value is not None:
             where.append(column + "=?")
             params.append(value)
+    if prefixes is not None:
+        if not prefixes or not all(isinstance(p, str) and p for p in prefixes):
+            raise DerivedIndexError("检索目录前缀不能为空")
+        where.append("(" + " OR ".join("substr(n.path,1,length(?))=?" for _ in prefixes) + ")")
+        for prefix in prefixes:
+            params.extend((prefix, prefix))
     score = "bm25(search_fts,0,0,0,0,3,1)" if long else "0.0"
     snippet = ("snippet(search_fts,-1,'[',']',' … ',32)" if long else
                "substr(f.body,max(1,instr(lower(f.body),?)-60),200)")
