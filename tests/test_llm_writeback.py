@@ -86,6 +86,7 @@ class LlmTopicWritebackTests(unittest.TestCase):
             self.seed(kb)
             cfg = self.make_cfg(kb)
 
+            before = {p.relative_to(kb).as_posix() for p in kb.rglob("*.md")}
             plan = steward.make_execution_plan(
                 cfg,
                 "发现选题 AI 媒体",
@@ -105,7 +106,8 @@ class LlmTopicWritebackTests(unittest.TestCase):
             self.assertTrue(page["review_required"])
             self.assertEqual(set(page["retrieval_source_hashes"]), {f"raw/source-{i}.md" for i in range(3)})
             self.assertIn("planned_pages_require_review", {x["type"] for x in plan["manual_review"]})
-            self.assertEqual(list(kb.rglob("*.md")), sorted(kb.rglob("*.md")))
+            after = {p.relative_to(kb).as_posix() for p in kb.rglob("*.md")}
+            self.assertEqual(before, after)
             self.assertFalse((kb / "_kb-steward").exists())
 
     def test_llm_failure_does_not_fall_back_to_executor_page(self):

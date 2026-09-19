@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 from .config import sha256_text
 from .markdown import bullet, frontmatter, slug
+from .retrieval import Selection, annotate_pages
+from .vault import Note
 
 
 class LLMPlanError(ValueError):
@@ -182,3 +184,39 @@ def topic_pages_from_llm(cfg: dict[str, Any], llm_result: dict[str, Any],
             "llm_item_index": idx,
         })
     return pages
+
+
+def integrate_topic_llm_writeback(
+    cfg: dict[str, Any],
+    planned_pages: list[dict[str, Any]],
+    llm_result: dict[str, Any],
+    input_notes: list[Note],
+    retrieval_report: dict[str, Any] | None,
+    plan_run_id: str,
+    validate_page: Callable[[str, list[str]], list[str]],
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Replace provisional executor topic pages with reviewed LLM pages.
+
+    A requested LLM failure never falls back to the deterministic topic template.
+    """
+    non_primary = [p for p in planned_pages if p.get("skill") != "topic-insight-miner"]
+    if not llm_result.get("ok"):
+        llm_result["writeback_used"] = False
+        llm_result["writeback_pages"] = 0
+        return non_primary, None
+    try:
+        if retrieval_report is None:
+            raise LLMPlanError("LLM 选题缺少可复核的检索快照，拒绝生成可写提案")
+        pages = topic_pages_from_llm(cfg, llm_result, plan_run_id)
+        annotate_pages(pages, Selection(input_notes, retrieval_report))
+        issues = [issue for page in pages for issue in validate_page(page["content"], page.get("sources", []))]
+        if issues:
+            raise LLMPlanError("LLM 选题页未通过落盘校验：" + "；".join(issues[:10]))
+        llm_result["writeback_used"] = True
+        llm_result["writeback_pages"] = len(pages)
+        return non_primary + pages, None
+    except LLMPlanError as exc:
+        llm_result["writeback_used"] = False
+        llm_result["writeback_pages"] = 0
+        llm_result.setdefault("issues", []).append(str(exc))
+        return non_primary, str(exc)
