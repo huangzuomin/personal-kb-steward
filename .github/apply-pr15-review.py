@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 
 BASE = 'f829f283f74742e7c6a4b27f88176a7d79b2fd63'
-TREE = '3a5f674a7563553044377edd545c61cdf35eac3d'
+TREE = '73479db4210af0937c3c0193ed6b0e6b535ce3bd'
 PATCH = '9ae6e2785aa14b375501b03528909dc2d5781f0cf6966d0d6fb1584c8b212b06'
 FILES = [
     '.github/workflows/ci.yml', 'HANDOVER.md', 'README.md', 'config.example.json',
@@ -32,6 +32,10 @@ path = Path(os.environ['RUNNER_TEMP']) / 'pr15-reviewed.patch'
 path.write_bytes(patch)
 subprocess.run(['git', 'apply', '--unidiff-zero', '--check', str(path)], check=True)
 subprocess.run(['git', 'apply', '--unidiff-zero', str(path)], check=True)
+followup = Path(os.environ['RUNNER_TEMP']) / 'pr15-platform.patch'
+followup.write_bytes(out('show', f'{ref}:.github/pr15-platform-followup.patch'))
+subprocess.run(['git', 'apply', '--check', str(followup)], check=True)
+subprocess.run(['git', 'apply', str(followup)], check=True)
 subprocess.run(['git', 'add', '--', *FILES], check=True)
 subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
 actual = out('write-tree').decode().strip()
