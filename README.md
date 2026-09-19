@@ -157,3 +157,12 @@ GitHub Actions 在 Ubuntu Python 3.11/3.12 和原生 Windows Python 3.12 上验�
 新知识页在 plan 序列化时由程序分配 `object_id` 与 `revision`，更新保留身份；`canonical_path` 从真实文件路径派生。旧页继续可读，不自动批量迁移。重复 ID 与更新基线冲突会在落盘前阻断。
 
 完整契约、兼容策略和暂不支持的事务能力见 [Stable Knowledge Objects](docs/stable-knowledge-objects.md)。
+
+## 专题增量更新（Reconcile）
+
+通过 `python scripts/reconcile.py "主题名" --source raw/新增资料.md` 为一个主题
+生成 `create / update / conflict / noop` 决定和待审核提案。可用 `--target` 指定已有
+主题路径或对象 ID；更新只替换 Agent 管理的资料综合区块，不重写手写正文。
+新建和更新均沿用 `review approve` / `review apply-approved`；不会直接应用。
+来源未变化则不调用模型、不重复生成页面。使用范围与来源发送说明见
+[Reconcile Engine](docs/reconcile-engine.md)。
