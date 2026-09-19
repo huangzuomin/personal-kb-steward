@@ -4,11 +4,12 @@ import hashlib
 import json
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .config import kb_root
+from .knowledge_objects import ObjectRegistry, identity_from_metadata, is_knowledge_path
 
 
 @dataclass
@@ -22,6 +23,20 @@ class Note:
     mtime: float
     size: int
 
+    @property
+    def object_id(self) -> str | None:
+        identity = identity_from_metadata(self.metadata) if is_knowledge_path(self.rel) else None
+        return identity[0] if identity else None
+
+    @property
+    def revision(self) -> int | None:
+        identity = identity_from_metadata(self.metadata) if is_knowledge_path(self.rel) else None
+        return identity[1] if identity else None
+
+    @property
+    def canonical_path(self) -> str:
+        return self.rel
+
 
 @dataclass
 class VaultIndex:
@@ -30,6 +45,14 @@ class VaultIndex:
     by_rel: dict[str, Note]
     by_stem: dict[str, list[Note]]
     by_title: dict[str, list[Note]]
+    objects: ObjectRegistry = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.objects = ObjectRegistry.from_notes(self.notes)
+
+    @property
+    def by_object_id(self) -> dict[str, Note]:
+        return {key: self.by_rel[obj.canonical_path] for key, obj in self.objects.by_id.items()}
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -51,6 +74,8 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
             continue
         key, value = line.split(":", 1)
         current_key = key.strip()
+        if current_key in {"object_id", "revision"} and current_key in meta:
+            meta["_object_identity_error"] = f"Duplicate identity field: {current_key}"
         value = value.strip()
         if value == "":
             meta[current_key] = []

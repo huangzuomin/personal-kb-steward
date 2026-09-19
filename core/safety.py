@@ -160,3 +160,7 @@ def require_delete_only_rollback(manifest: dict[str, Any]) -> None:
         raise SystemExit(
             "该运行包含更新页面，不能按新建页面删除回滚；请从备份恢复，事务回滚尚未实现。"
         )
+    if (manifest.get("write_started") and not manifest.get("created")) or any(
+        item.get("content_verified") is False for item in manifest.get("created", [])
+    ):
+        raise SystemExit("该运行的写入结果未能完整确认；不能自动删除回滚，请先检查文件及备份。")

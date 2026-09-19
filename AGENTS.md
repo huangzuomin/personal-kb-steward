@@ -134,6 +134,18 @@ review_required:
 
 其中 `sources` 必须是具体文件路径列表，不能只写 `raw/`。读取历史页面时可以兼容 `source`，但新生成页面必须使用 `sources`。
 
+## 稳定对象身份
+
+- 不由模型或 Skill 分配、修改 `object_id`。新知识页由 plan 边界分配，更新沿用原身份。
+- 对象 `revision` 由计划层递增；不要把它当作置信度或事实正确性的标记。
+- `canonical_path` 以实际文件位置为准，不将路径或标题当作身份。
+- 旧页没有身份时保持只读兼容，不主动批量改写 raw 或旧知识页。
+- 生成内容必须经 `write_execution_plan` → 审核 → `apply-plan`，不要直接调用旧的文件写入 helper。
+- 重复 ID、非法身份或修改前 hash 冲突不得强行覆盖，也不得通过降低审核标记绕过。
+- 包含 update 的运行不支持自动删除式 rollback；保留当前文件并按备份恢复流程处理。
+
+参阅 `docs/stable-knowledge-objects.md`。
+
 ## 用户入口
 
 普通用户只应看到 5 个高频入口：

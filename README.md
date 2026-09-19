@@ -150,3 +150,10 @@ python scripts/validate_config.py
 ```
 
 GitHub Actions 在 Ubuntu Python 3.11/3.12 和原生 Windows Python 3.12 上验证。先在无 config.json 的 checkout 运行完整测试，再单独校验示例配置。PR 基线变更会触发新验证，并记录实际 checkout 与两侧父提交。
+
+
+## 稳定知识对象
+
+新知识页在 plan 序列化时由程序分配 `object_id` 与 `revision`，更新保留身份；`canonical_path` 从真实文件路径派生。旧页继续可读，不自动批量迁移。重复 ID 与更新基线冲突会在落盘前阻断。
+
+完整契约、兼容策略和暂不支持的事务能力见 [Stable Knowledge Objects](docs/stable-knowledge-objects.md)。
