@@ -10,11 +10,46 @@ from typing import Any
 from .config import sha256_file, sha256_text
 from .dependencies import stale
 from .derived_index import DerivedIndexError, INTERNAL_DIRS, _info, _open, _path, search
-from .knowledge_objects import ObjectIdentityError, is_knowledge_path
+from .knowledge_objects import ObjectIdentityError
+from .layout import knowledge_dirs, knowledge_prefixes
 from .vault import Note, VaultIndex
 
 DEFAULT_PREFIXES = ("raw/", "quicknote/", "inbox/", "wiki/seeds/", "wiki/topics/", "wiki/sources/",
                     "wiki/evidence/", "wiki/gaps/", "wiki/claim-checks/")
+
+INPUT_DIRS = ("raw", "quicknote", "inbox")
+
+
+def retrieval_prefixes(cfg: dict[str, Any] | None = None,
+                       knowledge: tuple[str, ...] | None = None) -> tuple[str, ...]:
+    """Default recall scope: raw inputs first, then knowledge objects."""
+    return tuple(f"{d}/" for d in INPUT_DIRS) + (knowledge if knowledge is not None else knowledge_prefixes(cfg))
+
+
+def knowledge_prefixes_with_inputs(cfg: dict[str, Any] | None = None,
+                                   knowledge: tuple[str, ...] | None = None) -> tuple[str, ...]:
+    """Knowledge objects first, `raw/` last: for cross-source synthesis tasks."""
+    return (knowledge if knowledge is not None else knowledge_prefixes(cfg)) + ("raw/",)
+
+
+# --- Page predicates ------------------------------------------------------
+# These live here, not in the runner, because the runner has a hard line cap
+# and these are pure functions over config + a page dict.
+def topic_prefixes(cfg: dict[str, Any] | None = None) -> tuple[str, ...]:
+    return (knowledge_dirs(cfg)["topics_dir"] + "/",)
+
+
+def source_prefixes(cfg: dict[str, Any] | None = None) -> tuple[str, ...]:
+    return (knowledge_dirs(cfg)["sources_dir"] + "/",)
+
+
+def is_topic_page(page: dict[str, Any], cfg: dict[str, Any] | None = None) -> bool:
+    return str(page.get("rel_path", "")).startswith(topic_prefixes(cfg))
+
+
+def is_source_page(page: dict[str, Any], cfg: dict[str, Any] | None = None) -> bool:
+    return str(page.get("rel_path", "")).startswith(source_prefixes(cfg))
+
 # Strip only known task boilerplate, not arbitrary Chinese substrings or inferred concepts.
 BOILERPLATE = re.compile(r"准备写作素材|生成写作材料包|生成材料包|发现选题|发现主题|写作素材|材料包|素材包|围绕|关于|material pack", re.I)
 STOPWORDS = {"the", "and", "for", "with", "from", "this", "that", "about", "please",
@@ -22,10 +57,33 @@ STOPWORDS = {"the", "and", "for", "with", "from", "this", "that", "about", "plea
 NOTICE = "检索不等于事实核实；旧依据需复查。内容来自当前扫描的 Markdown，不从缓存回写。"
 
 
+# Words that mark a fact line as a case. Kept generic on purpose: upstream also
+# listed a specific city name here, which labelled any line mentioning that city
+# as a case regardless of what it described.
+CASE_MARKERS = ("案例", "项目", "case study", "implementation")
+
+
+def fallback_terms(query: str) -> list[str]:
+    """Query's own words, for when stopword filtering leaves nothing.
+
+    A hardcoded vocabulary here made every vault search as though it were the
+    upstream demo corpus, so the fallback is derived from the query instead.
+    """
+    return [q.lower() for q in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}|[\u4e00-\u9fff]{2,12}", query)]
+
+
 def query_terms(query: str) -> list[str]:
     clean = BOILERPLATE.sub(" ", query)
-    terms = [t.lower() for t in re.findall(r"[A-Za-z][A-Za-z0-9_+-]*|[\u4e00-\u9fff]+", clean)]
-    return list(dict.fromkeys(t for t in terms if t not in STOPWORDS))[:16] or ["ai", "新闻", "媒体", "温州", "知识"]
+    words = re.findall(r"[A-Za-z][A-Za-z0-9_+-]*|[\u4e00-\u9fff]+", clean)
+    terms = [t.lower() for t in words]
+    unique = list(dict.fromkeys(t for t in terms if t not in STOPWORDS))[:16]
+    if unique:
+        return unique
+    # No extractable term (empty query, or boilerplate only). The old fallback
+    # was a hardcoded demo vocabulary ("ai 新闻 媒体 温州 知识"), which made every
+    # vault search as though it were the upstream demo corpus. Fall back to the
+    # query's own words instead, so the behaviour stays vault-neutral.
+    return list(dict.fromkeys(terms))[:16]
 
 
 def excerpt(note: Note, terms: list[str], limit: int) -> str:
@@ -77,10 +135,14 @@ class Retriever:
             self.cached, self.pending = {}, {}
             self.incoming.clear()
 
-    def select(self, query: str, *, limit: int = 12, prefixes: tuple[str, ...] = DEFAULT_PREFIXES,
+    def select(self, query: str, *, limit: int = 12, prefixes: tuple[str, ...] | None = None,
                note_type: str | None = None, note_status: str | None = None) -> Selection:
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("检索 limit 必须为 1 至 100")
+        # None means "use the configured layout"; callers that pass an explicit
+        # tuple still get exactly that scope.
+        if prefixes is None:
+            prefixes = retrieval_prefixes(self.cfg)
         self._load()
         terms = query_terms(query)
         eligible = {}
@@ -155,7 +217,7 @@ class Retriever:
             same = self.cached.get(note.rel) == note.sha256
             pending = self.pending.get(note.rel) if same and not self.fallback else None
             edges = self.incoming[note.rel]
-            state = ("not_applicable" if not is_knowledge_path(note.rel) else
+            state = ("not_applicable" if not note.is_knowledge else
                      "unchecked" if not same or self.fallback else "stale" if pending else
                      "unversioned" if not edges or any(e["expected_sha256"] is None for e in edges) else "no_signal")
             hit = {"path": note.rel, "sha256": note.sha256, "object_id": note.object_id, "revision": note.revision,
@@ -167,11 +229,42 @@ class Retriever:
             hits.append(hit)
         return hits
 
-    def documents(self, notes: list[Note], max_chars: int) -> list[dict]:
-        return [{"path": n.rel, "title": n.title, "type": str(n.metadata.get("type", "")),
-                 "status": str(n.metadata.get("status", "")), "stage": str(n.metadata.get("stage", "")),
-                 "content": excerpt(n, self.terms, max_chars), "retrieval": self.hits.get(n.rel, {}),
-                 "usage_note": NOTICE} for n in notes]
+    def documents(self, notes: list[Note], max_chars: int,
+                  total_budget: int = 0) -> list[dict]:
+        """Build LLM input documents under an optional whole-set character budget.
+
+        `max_chars` caps each document; `total_budget` caps the sum. When a budget
+        is set, every document still gets a fair share (budget / len(notes)) so that
+        one long note cannot crowd out the rest, and later documents borrow whatever
+        earlier ones left unused. Without a budget, behaviour is unchanged.
+        """
+        return budget_documents(notes, max_chars, total_budget,
+                                render=lambda n, limit: {"path": n.rel, "title": n.title,
+                                    "type": str(n.metadata.get("type", "")),
+                                    "status": str(n.metadata.get("status", "")),
+                                    "stage": str(n.metadata.get("stage", "")),
+                                    "content": excerpt(n, self.terms, limit),
+                                    "retrieval": self.hits.get(n.rel, {}), "usage_note": NOTICE})
+
+
+def budget_documents(notes: list[Note], max_chars: int, total_budget: int = 0, *, render=None) -> list[dict]:
+    """Fair sequential content budget; 0 means uncapped total, never negative slicing."""
+    if type(max_chars) is not int or max_chars < 0 or type(total_budget) is not int or total_budget < 0:
+        raise ValueError("Source character budgets must be nonnegative integers")
+    remaining = total_budget
+    docs = []
+    for i, note in enumerate(notes):
+        limit = min(max_chars, remaining // (len(notes) - i)) if total_budget else max_chars
+        doc = render(note, limit) if render else {
+            "path": note.rel, "title": note.title, "type": str(note.metadata.get("type") or ""),
+            "status": str(note.metadata.get("status") or ""), "stage": str(note.metadata.get("stage") or ""),
+            "content": note.body[:limit],
+        }
+        docs.append(doc)
+        if total_budget:
+            remaining -= len(doc["content"])
+    return docs
+
 
 
 def annotate_pages(pages: list[dict], selection: Selection) -> None:

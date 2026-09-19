@@ -28,6 +28,8 @@ jobs:
             python-version: "3.12"
           - os: windows-latest
             python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.13"
 
     steps:
       - name: Check out repository

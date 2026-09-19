@@ -38,11 +38,46 @@ class SourceTraceabilityTests(unittest.TestCase):
             cfg = self.make_cfg(kb)
             index = build_index(cfg)
 
-            results = steward.query_results(index, "AI newsroom")
+            results = steward.query_results(index, "AI newsroom", cfg=cfg)
 
             self.assertGreaterEqual(len(results), 1)
             self.assertEqual(results[0]["path"], "quicknote/source.md")
             self.assertIn("quicknote/source.md", results[0]["sources"])
+
+    def test_query_results_recall_follows_config_write_dirs(self):
+        """Recall must track config.write, not a hardcoded 'wiki/' literal.
+
+        Regression guard: if the write layout is customised and retrieval still
+        looks in `wiki/`, freshly written notes are invisible and get
+        regenerated in a silent loop.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp)
+            (kb / "quicknote").mkdir()
+            (kb / "inbox").mkdir()
+            (kb / "raw").mkdir()
+            custom = kb / "_kb-steward" / "sources"
+            custom.mkdir(parents=True)
+            (custom / "note.md").write_text(
+                "# AI newsroom\n\nAI newsroom configured layout test.",
+                encoding="utf-8",
+            )
+            cfg = self.make_cfg(kb)
+            cfg["write"] = dict(cfg.get("write") or {})
+            cfg["write"]["sources_dir"] = "_kb-steward/sources"
+            # The scan scope must include the custom dir too, otherwise the note
+            # is never indexed and recall silently returns nothing.
+            cfg["scan"]["include_dirs"] = ["quicknote", "inbox", "raw", "_kb-steward"]
+            index = build_index(cfg)
+
+            results = steward.query_results(index, "AI newsroom", cfg=cfg)
+
+            self.assertEqual([r["path"] for r in results], ["_kb-steward/sources/note.md"])
+            legacy = steward.query_results(
+                index, "AI newsroom",
+                prefixes=("wiki/sources/",), cfg=cfg,
+            )
+            self.assertEqual(legacy, [], "explicit legacy prefixes must stay explicit")
 
     def test_healthcheck_reports_raw_coverage_and_mock_content(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -8,7 +9,7 @@ def _link_target(value: Any) -> str:
     text = str(value or "").strip()
     if text.startswith("[[") and text.endswith("]]"):
         text = text[2:-2].strip()
-    text = text.split("|", 1)[0].split("#", 1)[0].strip().replace("\\", "/")
+    text = re.split(r"(?<!\\)#", text.split("|", 1)[0], maxsplit=1)[0].strip().replace("\\#", "#").replace("\\", "/")
     return text
 
 
@@ -40,10 +41,12 @@ def _known_link_index(known: set[str] | list[dict[str, Any]]) -> tuple[set[str],
 
 
 def resolve_known_link(value: Any, known: set[str] | list[dict[str, Any]]) -> str | None:
+    paths, aliases = _known_link_index(known)
+    if isinstance(value, str) and value in paths:
+        return value
     target = _link_target(value)
     if not target:
         return None
-    paths, aliases = _known_link_index(known)
     if target in paths:
         return target
     matches = aliases.get(target) or aliases.get(target.casefold()) or set()
@@ -67,7 +70,7 @@ def validate_skill_items(data: dict[str, Any], known: set[str] | list[dict[str, 
     paths, _ = _known_link_index(known)
     for idx, item in enumerate(data.get("items", [])):
         for source in item.get("sources", []):
-            if source in {"raw", "raw/", "wiki", "wiki/"} or str(source).endswith("/"):
+            if source.endswith("/") or any(p.startswith(source + "/") for p in paths):
                 issues.append(f"items[{idx}] source too broad: {source}")
             if source not in paths:
                 issues.append(f"items[{idx}] source not provided: {source}")

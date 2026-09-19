@@ -21,23 +21,51 @@ def run_skill_runtime(
     mock: bool = False,
 ) -> dict[str, Any]:
     spec = load_skill(root, skill_name)
+    contract = {
+        "top_level": "items",
+        "required_item_keys": [
+            "title",
+            "type",
+            "status",
+            "stage",
+            "sources",
+            "summary",
+            "confidence",
+            "review_required",
+        ],
+        "required_item_types": {
+            "title": "string（单行）",
+            "type": "string，固定 topic-card" if skill_name == "topic-insight-miner" else "string，遵循当前 Skill 的页面类型",
+            "status": "string",
+            "stage": "string",
+            "sources": "array<string>，必须是本次提供文档的完整相对路径",
+            "summary": "string",
+            "confidence": "string，low|medium|high",
+            "review_required": "boolean",
+        },
+        "optional_item_types": {
+            "one_sentence_topic": "string",
+            "tension": "string",
+            "why_now": "array<string>",
+            "signals": "array<string>",
+            "angles": "array<string>",
+            "risks": "array<string>",
+            "gaps": "array<string>",
+            "manual_review": "array<string>",
+            "score": "string",
+            "related": "array<string>，只能填本次提供文档的链接，禁止编造",
+            "pending_links": "array<string>，想引但知识库中不存在的目标写这里",
+        },
+        "type_rules": [
+            "array<string> 字段必须返回 JSON 数组，每项一个短句；禁止把整段文字塞进数组或写成单个字符串。",
+            "没有内容的可选字段请省略；数组可用 []，字符串可用空字符串，不要混用类型。",
+        ],
+        "forbidden": ["source", "full_article", "draft_article"],
+    }
     payload = {
         "task": task,
         "skill": skill_name,
-        "output_contract": {
-            "top_level": "items",
-            "required_item_keys": [
-                "title",
-                "type",
-                "status",
-                "stage",
-                "sources",
-                "summary",
-                "confidence",
-                "review_required",
-            ],
-            "forbidden": ["source", "full_article", "draft_article"],
-        },
+        "output_contract": contract,
         "documents": documents,
     }
     try:
@@ -45,7 +73,7 @@ def run_skill_runtime(
             data = mock_skill_response(skill_name, task, documents)
             raw_text = json.dumps(data, ensure_ascii=False)
         else:
-            raw_text = call_chat_completion(cfg, build_system_prompt(spec), payload)
+            raw_text = call_chat_completion(cfg, build_system_prompt(spec, contract), payload)
             data = extract_json(raw_text)
     except (LLMError, json.JSONDecodeError, FileNotFoundError, KeyError) as exc:
         return {
@@ -59,9 +87,10 @@ def run_skill_runtime(
             "previews": [],
         }
 
-    canonicalize_related_links(data, documents)
     issues = validate_contract(data)
-    issues.extend(validate_skill_items(data, documents))
+    if not issues:
+        canonicalize_related_links(data, documents)
+        issues.extend(validate_skill_items(data, documents))
     return {
         "enabled": True,
         "mock": mock,
@@ -69,7 +98,7 @@ def run_skill_runtime(
         "skill_path": str(spec.path),
         "ok": not issues,
         "issues": issues,
-        "items": data.get("items", []),
-        "previews": render_previews(data),
+        "items": data.get("items", []) if isinstance(data, dict) else [],
+        "previews": render_previews(data) if not issues else [],
         "raw_chars": len(raw_text),
     }

@@ -51,7 +51,7 @@ def _current(index: VaultIndex, rel: str) -> Note | None:
         raise ObjectIdentityError(f"Object target escapes the vault: {rel}")
     if target.relative_to(index.root.resolve()).as_posix() != rel:
         raise ObjectIdentityError(f"Object writes through symlinks are not supported: {rel}")
-    return read_note(target, index.root.resolve()) if target.is_file() else None
+    return read_note(target, index.root.resolve(), prefixes=index.knowledge_prefixes) if target.is_file() else None
 
 
 def update_base(note: Note) -> dict[str, Any]:
@@ -90,11 +90,11 @@ already bound plan never increments revisions, changes IDs, or re-bases hashes.
             raise ObjectIdentityError(f"Unsupported object_schema_version: {version}")
         return
     pages = copy.deepcopy(plan.get("planned_pages", []))
-    if any(is_knowledge_path(str(page.get("rel_path") or "")) for page in pages):
+    if any(index.is_knowledge_path(str(page.get("rel_path") or "")) for page in pages):
         index.objects.require_valid()
     for page in pages:
         rel = str(page.get("rel_path") or "")
-        if not is_knowledge_path(rel):
+        if not index.is_knowledge_path(rel):
             continue
         content = page.get("content")
         if not isinstance(content, str):
@@ -131,7 +131,7 @@ object's ID. This is preflight validation, not a multi-file atomic transaction.
     """
     if schema_version is not None and (type(schema_version) is not int or schema_version != OBJECT_SCHEMA_VERSION):
         raise ObjectIdentityError(f"Unsupported object_schema_version: {schema_version}")
-    if any(is_knowledge_path(str(page.get("rel_path") or "")) for page in pages):
+    if any(index.is_knowledge_path(str(page.get("rel_path") or "")) for page in pages):
         index.objects.require_valid()
     from .retrieval import validate_retrieval_page
     seen: dict[str, str] = {}
@@ -141,7 +141,7 @@ object's ID. This is preflight validation, not a multi-file atomic transaction.
             from .reconcile import validate_reconcile_page
             validate_reconcile_page(index, page)
         rel = str(page.get("rel_path") or "")
-        if not is_knowledge_path(rel):
+        if not index.is_knowledge_path(rel):
             continue
         meta = _metadata(page["content"])
         proposed = identity_from_metadata(meta)
@@ -178,8 +178,8 @@ object's ID. This is preflight validation, not a multi-file atomic transaction.
                     raise ObjectIdentityError(f"Base revision/hash conflict for {rel}; regenerate the plan")
 
 
-def object_manifest_fields(page: dict[str, Any]) -> dict[str, Any]:
-    if not is_knowledge_path(str(page.get("rel_path") or "")):
+def object_manifest_fields(page: dict[str, Any], *, prefixes: tuple[str, ...] = ("wiki/",)) -> dict[str, Any]:
+    if not is_knowledge_path(str(page.get("rel_path") or ""), prefixes):
         return {}
     identity = identity_from_metadata(_metadata(page["content"]))
     if identity is None:

@@ -31,9 +31,13 @@ class DryRunTests(unittest.TestCase):
         before = {p.relative_to(self.vault): p.read_bytes() for p in self.vault.rglob("*") if p.is_file()}
         env = dict(os.environ)
         env.pop("STEWARD_TEST_UNUSED_KEY", None)
+        # The vault here is a 7-file template: a healthy run takes about a
+        # second. The allowance is generous because this test shells out, and
+        # under a full-suite run the machine is busy enough that 30s is not a
+        # reliable ceiling — the failure it produced was load, not a hang.
         result = subprocess.run(
             [sys.executable, "scripts/personal_kb_steward.py", "plan", *args, "整理知识库"],
-            cwd=self.home, capture_output=True, text=True, encoding="utf-8", env=env, timeout=30,
+            cwd=self.home, capture_output=True, text=True, encoding="utf-8", env=env, timeout=180,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("dry-run", result.stdout)

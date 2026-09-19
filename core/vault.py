@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .layout import INTERNAL_DIRS, excluded_note, knowledge_prefixes, scan_dirs
 from .config import kb_root
 from .knowledge_objects import ObjectRegistry, identity_from_metadata, is_knowledge_path
 
@@ -22,15 +24,20 @@ class Note:
     sha256: str
     mtime: float
     size: int
+    knowledge_prefixes: tuple[str, ...] = field(default=("wiki/",), repr=False)
+
+    @property
+    def is_knowledge(self) -> bool:
+        return is_knowledge_path(self.rel, self.knowledge_prefixes)
 
     @property
     def object_id(self) -> str | None:
-        identity = identity_from_metadata(self.metadata) if is_knowledge_path(self.rel) else None
+        identity = identity_from_metadata(self.metadata) if self.is_knowledge else None
         return identity[0] if identity else None
 
     @property
     def revision(self) -> int | None:
-        identity = identity_from_metadata(self.metadata) if is_knowledge_path(self.rel) else None
+        identity = identity_from_metadata(self.metadata) if self.is_knowledge else None
         return identity[1] if identity else None
 
     @property
@@ -45,10 +52,16 @@ class VaultIndex:
     by_rel: dict[str, Note]
     by_stem: dict[str, list[Note]]
     by_title: dict[str, list[Note]]
+    by_attachment: dict[str, list[str]] = field(default_factory=dict)
+    knowledge_prefixes: tuple[str, ...] = field(default=("wiki/",), repr=False)
+    obsidian_compat: bool = False
     objects: ObjectRegistry = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.objects = ObjectRegistry.from_notes(self.notes)
+
+    def is_knowledge_path(self, rel: str) -> bool:
+        return is_knowledge_path(rel, self.knowledge_prefixes)
 
     @property
     def by_object_id(self) -> dict[str, Note]:
@@ -100,7 +113,7 @@ def first_heading(body: str) -> str | None:
     return None
 
 
-def read_note(path: Path, root: Path) -> Note:
+def read_note(path: Path, root: Path, *, prefixes: tuple[str, ...] = ("wiki/",)) -> Note:
     raw = path.read_bytes()
     text = raw.decode("utf-8-sig", errors="replace")
     meta, body = parse_frontmatter(text)
@@ -115,33 +128,127 @@ def read_note(path: Path, root: Path) -> Note:
         sha256=hashlib.sha256(raw).hexdigest(),
         mtime=stat.st_mtime,
         size=stat.st_size,
+        knowledge_prefixes=prefixes,
     )
 
 
 def build_index(cfg: dict[str, Any]) -> VaultIndex:
     root = kb_root(cfg)
-    scan_cfg = cfg["scan"]
-    include_dirs = scan_cfg["include_dirs"]
-    exclude_dirs = set(scan_cfg["exclude_dirs"])
-    extensions = set(scan_cfg["extensions"])
-    notes: list[Note] = []
-    for dirname in include_dirs:
+    prefixes = knowledge_prefixes(cfg)
+    excluded = set(cfg["scan"]["exclude_dirs"]) | INTERNAL_DIRS
+    extensions = set(cfg["scan"]["extensions"])
+    found: dict[str, Note] = {}
+
+    def add(path: Path) -> None:
+        rel = path.relative_to(root)
+        if (path.suffix.lower() not in extensions or set(rel.parts) & excluded
+                or excluded_note(cfg, path) or path.resolve() != path or not path.is_file()):
+            return
+        if rel.as_posix() not in found:
+            found[rel.as_posix()] = read_note(path, root, prefixes=prefixes)
+
+    def walk_error(exc: OSError) -> None:
+        raise exc
+
+    for dirname in scan_dirs(cfg):
         base = root / dirname
-        if not base.exists():
+        if (not base.exists() or not base.resolve().is_relative_to(root) or base.resolve() != base
+                or set(base.relative_to(root).parts) & excluded):
             continue
-        for path in base.rglob("*"):
-            if not path.is_file() or path.suffix.lower() not in extensions:
-                continue
-            if set(path.relative_to(root).parts) & exclude_dirs:
-                continue
-            notes.append(read_note(path, root))
+        for parent, dirs, files in os.walk(base, followlinks=False, onerror=walk_error):
+            dirs[:] = sorted(d for d in dirs if d not in excluded and (Path(parent) / d).resolve() == Path(parent) / d)
+            for name in sorted(files):
+                add(Path(parent) / name)
     for path in root.glob("*.md"):
         if path.name != cfg["write"]["log_file"]:
-            notes.append(read_note(path, root))
-    by_rel = {note.rel: note for note in notes}
+            add(path)
+    notes = sorted(found.values(), key=lambda n: n.rel.lower())
     by_stem: dict[str, list[Note]] = defaultdict(list)
     by_title: dict[str, list[Note]] = defaultdict(list)
     for note in notes:
         by_stem[note.path.stem].append(note)
         by_title[note.title.strip().lower()].append(note)
-    return VaultIndex(root=root, notes=sorted(notes, key=lambda n: n.rel.lower()), by_rel=by_rel, by_stem=dict(by_stem), by_title=dict(by_title))
+    compat = cfg.get("link_resolution", {}).get("obsidian_compat", False)
+    return VaultIndex(root, notes, found, dict(by_stem), dict(by_title),
+                      by_attachment=build_attachment_index(root, excluded) if compat else {},
+                      knowledge_prefixes=prefixes, obsidian_compat=compat)
+
+
+def build_attachment_index(root: Path, excluded: set[str] | frozenset[str] = INTERNAL_DIRS) -> dict[str, list[str]]:
+    """索引全库非 .md 文件（附件），供双链解析使用。
+
+    Obsidian 的链接解析认全文件类型，`![[报告.pdf]]` 与 `![[图片.png]]` 都是合法双链。
+    若只索引 .md，所有附件嵌入都会被误报为断链——因此这里按相对路径扫描全库。
+    键为小写 basename，值为库内相对路径列表。
+    """
+    index: dict[str, list[str]] = defaultdict(list)
+    skip_tops = set(excluded) | INTERNAL_DIRS
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in skip_tops and (Path(dirpath) / d).resolve() == Path(dirpath) / d]
+        for name in filenames:
+            path = Path(dirpath) / name
+            if path.resolve() != path or not path.is_file() or name.startswith(".") or name.lower().endswith(".md"):
+                continue
+            rel = (Path(dirpath) / name).relative_to(root).as_posix()
+            index[name.lower()].append(rel)
+    return dict(index)
+
+
+def extract_wikilinks(text: str) -> list[str]:
+    r"""提取 Obsidian 双链目标。
+
+    三处修正（本库实测踩到的坑）：
+    1. `\#` 是**文件名的一部分**（本库既有约定，如 `[[\#我平常都看什麼書]]`），
+       不能当作锚点分隔符截断。
+    2. 不匹配 Markdown 链接文本里的 `[[PDF] xxx](https://…)`，那不是双链。
+    3. 锚点 `#` 仅在未转义时才算分隔符。
+    """
+    targets: list[str] = []
+    for raw in re.findall(r"\[\[([^\[\]\r\n]+)\]\]", text):
+        if "\n" in raw or raw.startswith("["):
+            continue
+        target = raw.split("|")[0]
+        target = re.split(r"(?<!\\)#", target)[0]
+        target = target.strip().replace("\\#", "#")
+        if target:
+            targets.append(target)
+    return targets
+
+
+def wiki_stem(target: str) -> str:
+    """Obsidian 口径的 stem：只在 target 真的以 .md 结尾时才剥离它。
+
+    不能用 Path(...).stem —— 它会把文件名里的「.（数字）」当扩展名剥掉，
+    例如 `方案（3.0）` 会被截成 `方案（3`，导致这类笔记永远解析不到。
+    索引侧的键来自带 `.md` 的真实文件名，因此这里是「带 .md 才剥」的非对称修正。
+    """
+    clean = target.strip().replace("\\", "/")
+    base = clean.rsplit("/", 1)[-1]
+    if base.lower().endswith(".md"):
+        return base[:-3]
+    return base
+
+
+def resolve_link(index: VaultIndex, target: str) -> str | None:
+    """按 Obsidian 口径解析双链：相对路径 → 文件名 stem → 附件名 → 标题。"""
+    clean = target.strip()
+    if clean in index.by_rel:
+        return clean
+    as_path = clean.replace("\\", "/")
+    if as_path in index.by_rel:
+        return as_path
+    if as_path.startswith("/") or ".." in as_path.split("/") or ":" in as_path or "\x00" in as_path:
+        return None
+    attachment_paths = {p for paths in index.by_attachment.values() for p in paths}
+    if as_path in attachment_paths:
+        return as_path
+    matches = index.by_stem.get(wiki_stem(clean), [])
+    if len(matches) == 1:
+        return matches[0].rel
+    attachment = index.by_attachment.get(as_path.lower(), [])
+    if len(attachment) == 1:
+        return attachment[0]
+    title_matches = index.by_title.get(clean.lower(), [])
+    if len(title_matches) == 1:
+        return title_matches[0].rel
+    return None

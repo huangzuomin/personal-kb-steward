@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
+from .layout import knowledge_dirs
 from .config import kb_root, sha256_text
 from .state import changed_notes, load_processed_index, load_state, unprocessed_notes
 from .vault import Note, build_index
@@ -57,7 +58,7 @@ def make_promote_candidate_page(
     body: str,
     plan_run_id: str,
 ) -> dict[str, Any]:
-    target = (Path(cfg["write"][rel_dir_key]) / f"{readable_filename(title, kind)}.md").as_posix()
+    target = (Path(knowledge_dirs(cfg)[rel_dir_key]) / f"{readable_filename(title, kind)}.md").as_posix()
     type_by_kind = {
         "topic": "topic-page",
         "concept": "concept-page",
@@ -77,7 +78,7 @@ def make_promote_candidate_page(
         "related: []",
         f"tags: {json.dumps(['kb-initialize', kind, 'candidate'], ensure_ascii=False)}",
         "confidence: medium",
-        "review_required: false",
+        "review_required: true",
         f"origin: {json.dumps({'source_paths': sources, 'operation': 'kb-initialize', 'run_id': plan_run_id}, ensure_ascii=False)}",
         "---",
         "",
@@ -89,8 +90,9 @@ def make_promote_candidate_page(
         *[f"- [[{source}]]" for source in sources],
         "",
         "## 后续整理",
-        "- 这是初始化 pipeline 自动生成的候选页，可直接落盘进入 growing 状态。",
+        "- 这是初始化 pipeline 自动生成的候选页，主题边界尚未人工确认。",
         "- 后续应在跨批次合并阶段确认边界、命名、证据充分性和 related 链接。",
+        "- 转正为正式专题前，需核对全部来源是否确实支持本页主题。",
     ])
     return {
         "skill": "kb-initialize",
@@ -101,90 +103,68 @@ def make_promote_candidate_page(
         "origin": {"source_paths": sources, "operation": "kb-initialize", "run_id": plan_run_id},
         "content_sha256": sha256_text(content),
         "content": content,
-        "review_required": False,
+        # Auto-generated candidate pages must never claim they are ready to
+        # promote themselves; a human confirms the topic boundary first.
+        "review_required": True,
         "confidence": "medium",
     }
 
 
+def candidate_promotion_specs(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Candidate-page rules, taken from config rather than hardcoded examples.
+
+    An empty list means this vault has opted out of automatic promotion, which
+    is the safer default: a batch of unrelated documents must not manufacture
+    a "温州 AI 政策与产业" topic just because the batch is large enough.
+    """
+    specs = cfg.get("candidate_promotion")
+    if not isinstance(specs, list):
+        return []
+    return [spec for spec in specs if isinstance(spec, dict) and spec.get("title")]
+
+
 def promote_candidate_pages(cfg: dict[str, Any], notes: list[Note], plan_run_id: str) -> list[dict[str, Any]]:
+    """Build candidate pages only when config declares rules and markers match.
+
+    Nothing here names a city, an agency, or a project. Every title, marker and
+    body comes from `cfg["candidate_promotion"]`, so a batch that shares no
+    declared marker produces no page at all.
+    """
     sources = [note.rel for note in notes]
     if not sources:
         return []
-    text = "\n".join(f"{note.title}\n{note.body[:1200]}" for note in notes)
+    specs = candidate_promotion_specs(cfg)
+    if not specs:
+        return []
+    quality = cfg.get("quality_gate", {})
+    min_keys = {"topic": "min_sources_for_topic", "material-pack": "min_evidence_items_for_material_pack"}
     pages: list[dict[str, Any]] = []
-    if len(sources) >= int(cfg.get("quality_gate", {}).get("min_sources_for_topic", 3)):
+    for spec in specs:
+        kind = str(spec.get("kind") or "").strip()
+        if not kind or not spec.get("rel_dir_key"):
+            continue
+        markers = [str(m) for m in (spec.get("match_any") or []) if str(m).strip()]
+        if not markers:
+            continue  # No discriminating rule is not permission to promote the whole batch.
+        floor_key = min_keys.get(kind, "min_sources_for_topic")
+        floor = max(1, int(spec.get("min_sources") or quality.get(floor_key, 3)))
+        scoped = [note.rel for note in notes
+                  if any(marker.casefold() in f"{note.title}\n{note.body}".casefold() for marker in markers)]
+        scoped = scoped[:max(1, int(spec.get("max_sources") or 8))]
+        if len(scoped) < floor:
+            continue
         pages.append(make_promote_candidate_page(
             cfg,
-            kind="topic",
-            title="温州人工智能创新发展路径",
-            rel_dir_key="topics_dir",
-            sources=sources[:8],
+            kind=kind,
+            title=str(spec["title"]),
+            rel_dir_key=str(spec["rel_dir_key"]),
+            sources=scoped,
             plan_run_id=plan_run_id,
-            body=(
-                "## 主题边界\n"
-                "围绕温州如何通过政策、机构、产业平台和场景应用推动人工智能发展，"
-                "梳理其路径、约束和可验证证据。\n\n"
-                "## 待验证问题\n"
-                "- 温州 AI 发展的核心抓手是什么？\n"
-                "- 政策目标、产业基础和应用场景之间是否形成闭环？"
-            ),
+            body="\n".join(str(line) for line in (spec.get("body") or [])).strip(),
         ))
-    if any(marker in text for marker in ("人工智能局", "先行市", "示范应用第一城")):
-        pages.append(make_promote_candidate_page(
-            cfg,
-            kind="concept",
-            title="人工智能创新发展先行市",
-            rel_dir_key="concepts_dir",
-            sources=sources[:8],
-            plan_run_id=plan_run_id,
-            body=(
-                "## 概念定义候选\n"
-                "该概念指向地方政府围绕 AI 基础设施、产业集群、示范应用和治理机制"
-                "进行系统部署的一类城市发展目标。\n\n"
-                "## 需要补证\n"
-                "- 官方定义或政策出处\n"
-                "- 目标指标和时间表\n"
-                "- 与具体产业、公共服务场景的关系"
-            ),
-        ))
-    case_sources = [
-        n.rel for n in notes
-        if any(m in f"{n.title}\n{n.body[:1000]}" for m in ("揭牌", "瓯海", "财政", "车间", "智能眼镜"))
-    ]
-    if case_sources:
-        pages.append(make_promote_candidate_page(
-            cfg,
-            kind="case",
-            title="温州AI应用与机构建设案例线索",
-            rel_dir_key="cases_dir",
-            sources=case_sources[:8],
-            plan_run_id=plan_run_id,
-            body=(
-                "## 案例线索\n"
-                "本页收集初始化阶段识别出的案例候选，后续应拆分为具备主体、行动、"
-                "场景、结果的独立案例。\n\n"
-                "## 候选方向\n"
-                "- 温州人工智能局挂牌\n"
-                "- AI 赋能制造或财政监督\n"
-                "- 智能眼镜产业生态建设"
-            ),
-        ))
-    if len(sources) >= int(cfg.get("quality_gate", {}).get("min_evidence_items_for_material_pack", 5)):
-        pages.append(make_promote_candidate_page(
-            cfg,
-            kind="material-pack",
-            title="温州AI政策与产业研究资料包",
-            rel_dir_key="materials_dir",
-            sources=sources[:12],
-            plan_run_id=plan_run_id,
-            body=(
-                "## 用途\n"
-                "为后续写作、研究或项目汇报提供一组可追溯的温州 AI 政策与产业资料。\n\n"
-                "## 后续整理\n"
-                "- 按政策规划、产业生态、应用案例、治理机制分组\n"
-                "- 标注可引用事实和待核验信息"
-            ),
-        ))
+    hashes = {note.rel: note.sha256 for note in notes}
+    for page in pages:
+        page["retrieval_source_hashes"] = {rel: hashes[rel] for rel in page["sources"]}
     fresh, _ = split_existing_pages(cfg, pages)
     return fresh
 

@@ -60,8 +60,15 @@ from core.config import (
     state_path,
     write_json,
 )
-from core.vault import Note, VaultIndex, build_index
-from core.retrieval import Retriever, annotate_pages, query_terms as retrieval_terms
+from core.vault import (
+    Note, VaultIndex, build_index,
+    extract_wikilinks as extract_wikilinks_core,
+    resolve_link as resolve_link_core,
+)
+from core.retrieval import (budget_documents as llm_documents, CASE_MARKERS, Retriever, annotate_pages, fallback_terms, is_source_page,
+                            is_topic_page, knowledge_prefixes_with_inputs, retrieval_prefixes,
+                            query_terms as retrieval_terms)
+from core.knowledge_objects import knowledge_root_prefixes as knowledge_roots
 from core.state import (
     changed_notes,
     load_processed_index,
@@ -120,8 +127,6 @@ def readable_filename(title: str, fallback: str = "未命名页面") -> str:
     if cleaned.lower().startswith("seed-"):
         cleaned = cleaned[5:].strip("-")
     return cleaned[:80] or fallback
-def canonical_link_target(index: VaultIndex, target: str) -> str | None:
-    return resolve_link(index, target)
 def safe_wikilink(index: VaultIndex, target: str) -> str:
     resolved = canonical_link_target(index, target)
     if not resolved:
@@ -132,22 +137,19 @@ def link_list(items: list[str], empty: str = "暂无") -> str:
 def safe_link_list(index: VaultIndex, items: list[str], empty: str = "暂无") -> str:
     return bullet([safe_wikilink(index, item) for item in items], empty)
 def extract_wikilinks(text: str) -> list[str]:
-    return re.findall(r"\[\[([^\]|#]+)", text)
+    return extract_wikilinks_core(text)
 def resolve_link(index: VaultIndex, target: str) -> str | None:
-    clean = target.strip()
-    if clean in index.by_rel:
-        return clean
-    as_path = clean.replace("\\", "/")
-    if as_path in index.by_rel:
-        return as_path
-    stem = Path(clean).stem
-    matches = index.by_stem.get(stem, [])
-    if len(matches) == 1:
-        return matches[0].rel
-    title_matches = index.by_title.get(clean.lower(), [])
-    if len(title_matches) == 1:
-        return title_matches[0].rel
-    return None
+    return resolve_link_core(index, target)
+def canonical_link_target(index: VaultIndex, target: str) -> str | None:
+    return resolve_link(index, target)
+def is_noncanonical_strict(target: str, resolved: str) -> bool:
+    """只把「写了路径但写错」算作 noncanonical；裸 stem 是 Obsidian 惯例，合法。"""
+    clean = target.strip().replace("\\", "/")
+    if "/" not in clean and not clean.lower().endswith(".md"):
+        return False
+    return clean != resolved
+
+
 def normalize_source(value: Any) -> list[str]:
     if not value:
         return []
@@ -174,10 +176,9 @@ def tokens(text: str) -> list[str]:
 def score_note(note: Note, query_terms: list[str]) -> int:
     hay = (note.title + "\n" + note.body[:6000]).lower()
     return sum(3 if term in note.title.lower() else 1 for term in query_terms if term.lower() in hay)
-def select_notes(index: VaultIndex, query: str, limit: int = 12, prefixes: tuple[str, ...] = ("raw/", "quicknote/", "inbox/", "wiki/seeds/", "wiki/topics/")) -> list[Note]:
-    query_terms = tokens(query)
-    if not query_terms:
-        query_terms = ["ai", "新闻", "媒体", "温州", "知识"]
+def select_notes(index: VaultIndex, query: str, limit: int = 12, prefixes: tuple[str, ...] | None = None, cfg: dict[str, Any] | None = None) -> list[Note]:
+    prefixes = retrieval_prefixes(cfg) if prefixes is None else prefixes  # config.write, never a literal
+    query_terms = tokens(query) or fallback_terms(query)
     scored: list[tuple[int, Note]] = []
     for note in index.notes:
         if not note.rel.startswith(prefixes):
@@ -186,7 +187,7 @@ def select_notes(index: VaultIndex, query: str, limit: int = 12, prefixes: tuple
         if score:
             scored.append((score, note))
     return [note for _, note in sorted(scored, key=lambda x: (-x[0], x[1].rel))[:limit]]
-def query_results(index: VaultIndex, query: str, limit: int = 12, prefixes: tuple[str, ...] = ("raw/", "quicknote/", "inbox/", "wiki/seeds/", "wiki/topics/")) -> list[dict[str, Any]]:
+def query_results(index: VaultIndex, query: str, limit: int = 12, prefixes: tuple[str, ...] | None = None, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     return [
         {
             "path": note.rel,
@@ -194,20 +195,8 @@ def query_results(index: VaultIndex, query: str, limit: int = 12, prefixes: tupl
             "sources": note_sources(note) or [note.rel],
             "summary": note_summary(note, 180),
         }
-        for note in select_notes(index, query, limit=limit, prefixes=prefixes)
+        for note in select_notes(index, query, limit=limit, prefixes=prefixes, cfg=cfg)
     ]
-def llm_documents(notes: list[Note], max_chars: int) -> list[dict[str, str]]:
-    docs = []
-    for note in notes:
-        docs.append({
-            "path": note.rel,
-            "title": note.title,
-            "type": str(note.metadata.get("type") or ""),
-            "status": str(note.metadata.get("status") or ""),
-            "stage": str(note.metadata.get("stage") or ""),
-            "content": note.body[:max_chars],
-        })
-    return docs
 def executor_notes(notes: list[Note]) -> list[dict[str, Any]]:
     return [
         {
@@ -330,7 +319,7 @@ def mvp_executor_plan(
         notes = unprocessed_notes(processed_index, candidates_all, skill)[: cfg["scan"]["max_files_per_run"]]
         context = {"config": cfg, "notes": executor_notes(notes), "use_llm": use_llm}
     elif skill == "topic-insight-miner":
-        selection = retriever.select(task, limit=8, prefixes=("wiki/seeds/", "wiki/topics/", "wiki/sources/", "raw/"))
+        selection = retriever.select(task, limit=8, prefixes=knowledge_prefixes_with_inputs(cfg))
         notes = selection.notes
         context = {"config": cfg, "query": task, "notes": executor_notes(notes)}
     else:
@@ -353,6 +342,9 @@ def mvp_executor_plan(
     pages = planned_pages_from_executor_result(cfg, result, plan_run_id)
     if selection:
         annotate_pages(pages, selection)
+    elif skill == "topic-research-compile":
+        for page in pages:
+            page["retrieval_source_hashes"] = {n.rel: n.sha256 for n in notes if n.rel in page.get("sources", [])}
     return {
         "skill": skill,
         "inputs": result.get("inputs", []),
@@ -381,9 +373,9 @@ def select_llm_input_notes(
         return unprocessed_notes(processed_index, candidates, skill)[:5]
     retriever = retriever or Retriever(cfg, index)
     if skill == "topic-insight-miner":
-        return retriever.select(task, limit=8, prefixes=("wiki/seeds/", "wiki/topics/", "wiki/sources/", "wiki/work-memory/", "raw/")).notes
+        return retriever.select(task, limit=8, prefixes=knowledge_prefixes_with_inputs(cfg)).notes
     if skill == "writing-material-pack":
-        return retriever.select(task, limit=8, prefixes=("wiki/topics/", "wiki/sources/", "wiki/evidence/", "wiki/gaps/", "wiki/claim-checks/", "wiki/seeds/", "raw/")).notes
+        return retriever.select(task, limit=8, prefixes=knowledge_prefixes_with_inputs(cfg)).notes
     return retriever.select(task, limit=6).notes
 def unique_path(path: Path) -> Path:
     if not path.exists():
@@ -411,7 +403,7 @@ def source_quality(index: VaultIndex, sources: list[str]) -> tuple[bool, list[st
     if not sources:
         issues.append("缺少来源")
     for source in sources:
-        if source.endswith("/") or source in {"raw", "raw/", "wiki", "wiki/"}:
+        if source.endswith("/") or (index.root / source).is_dir():
             issues.append(f"来源过粗：{source}")
         elif source not in index.by_rel:
             issues.append(f"来源不存在：{source}")
@@ -440,11 +432,11 @@ def work_memory_candidate(note: Note) -> bool:
     text = note.title + "\n" + note.body[:1500]
     patterns = ["会议", "周报", "项目", "复盘", "决定", "决策", "待办", "行动项", "课程", "上课", "开会", "产品优化"]
     return any(p in text for p in patterns)
-def raw_coverage_report(index: VaultIndex) -> dict[str, Any]:
+def raw_coverage_report(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
     raw_files = sorted(note.rel for note in index.notes if note.rel.startswith("raw/"))
     coverage: dict[str, list[str]] = {rel: [] for rel in raw_files}
     for note in index.notes:
-        if not note.rel.startswith("wiki/"):
+        if not note.rel.startswith(knowledge_roots(cfg)):
             continue
         for source in note_sources(note):
             if source in coverage:
@@ -490,8 +482,9 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
     weak_topics = []
     low_confidence_active = []
     processed_schema_error = load_processed_index(cfg).get("_schema_error")
+    roots = knowledge_roots(cfg)
     for note in index.notes:
-        if note.rel.startswith("wiki/") and not note.metadata:
+        if note.rel.startswith(roots) and not note.metadata:
             missing_meta.append(note.rel)
         status = str(note.metadata.get("status", "")).strip()
         stage = str(note.metadata.get("stage", "")).strip()
@@ -500,38 +493,38 @@ def healthcheck(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
         elif status and status not in legal_status:
             status_issues.append({"file": note.rel, "status": status})
         sources = note_sources(note)
-        if note.rel.startswith("wiki/") and note.metadata and note.path.name != "README.md":
+        if note.rel.startswith(roots) and note.metadata and note.path.name != "README.md":
             _, issues = source_quality(index, sources)
             source_issues.extend({"file": note.rel, "issue": item} for item in issues)
         for target in extract_wikilinks(note.body):
             resolved = resolve_link(index, target)
             if not resolved:
                 broken.append({"file": note.rel, "target": target})
-            elif target != resolved:
+            elif (is_noncanonical_strict(target, resolved) if index.obsidian_compat else target != resolved):
                 noncanonical_links.append({"file": note.rel, "target": target, "suggested": resolved})
         if "Manual synthesis required" in note.body or "No explicit" in note.body:
             placeholders.append(note.rel)
-        if note.rel.startswith("wiki/") and any(marker in note.body for marker in BLOCKED_APPLY_MARKERS):
+        if note.rel.startswith(roots) and any(marker in note.body for marker in BLOCKED_APPLY_MARKERS):
             mock_content.append(note.rel)
         if weak_topic_stub(note):
             weak_topics.append(note.rel)
         confidence = str(note.metadata.get("confidence", "")).strip().lower()
-        if note.rel.startswith("wiki/") and confidence == "low" and stage == "active":
+        if note.rel.startswith(roots) and confidence == "low" and stage == "active":
             low_confidence_active.append(note.rel)
     inbound = Counter()
     for note in index.notes:
         for target in extract_wikilinks(note.body):
             resolved = resolve_link(index, target)
             if resolved:
-                inbound[Path(resolved).stem] += 1
-    orphans = [n.rel for n in index.notes if n.rel.startswith("wiki/") and inbound[n.path.stem] == 0 and n.path.name != "README.md"]
+                inbound[resolved] += 1
+    orphans = [n.rel for n in index.notes if n.rel.startswith(roots) and inbound[n.rel] == 0 and n.path.name != "README.md"]
     root = index.root
     backlog = {
         "quicknote": len(list((root / "quicknote").glob("*.md"))) if (root / "quicknote").exists() else 0,
         "inbox": len(list((root / "inbox").glob("*.md"))) if (root / "inbox").exists() else 0,
         "raw": len(list((root / "raw").glob("*.md"))) if (root / "raw").exists() else 0,
     }
-    raw_coverage = raw_coverage_report(index)
+    raw_coverage = raw_coverage_report(index, cfg)
     risk_buckets = {
         "P0": [],
         "P1": [],
@@ -624,7 +617,7 @@ def evidence_items(notes: list[Note], query: str) -> list[dict[str, str]]:
         if not lines:
             lines = [note_summary(note, 180)]
         for line in lines[:3]:
-            kind = "案例" if any(x in line for x in ["案例", "FT", "NYT", "BBC", "CBC", "DeepSeek", "温州", "项目"]) else "事实线索"
+            kind = "案例" if any(x in line for x in CASE_MARKERS) else "事实线索"
             items.append({"source": note.rel, "kind": kind, "text": line})
     return items[:30]
 def merge_ops(skill: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -887,15 +880,16 @@ def make_execution_plan(
                 "items": raw_compile_result.get("issues", [])[:20],
             })
     for page in planned_pages:
-        if str(page.get("rel_path", "")).startswith("wiki/sources/") and not page_has_blocked_placeholder(page):
-            page["review_required"] = False
-            page["confidence"] = "high"
+        # Only source notes are auto-cleared; topic/material pages keep their review flag.
+        if is_source_page(page, cfg) and not page_has_blocked_placeholder(page, cfg):
+            page["review_required"], page["confidence"] = False, "high"
     llm_result: dict[str, Any] | None = None
     if use_llm and not scheduled:
         input_notes = select_llm_input_notes(index, cfg, task, primary_skill, input_scope, processed_index, retriever)
         llm_retrieval_report = retriever.history[-1] if primary_skill == "topic-insight-miner" and retriever.history else None
         document_builder = retriever.documents if retriever.history else llm_documents
-        docs = document_builder(input_notes, int(cfg["scan"].get("max_source_chars", 6000)))
+        docs = document_builder(input_notes, int(cfg["scan"].get("max_source_chars", 6000)),
+                                int(cfg["scan"].get("max_total_source_chars", 0)))
         llm_result = run_skill_runtime(ROOT, cfg, primary_skill, task, docs, mock=mock_llm)
         for action in actions:
             if action.get("operation") == "run_primary_skill":
@@ -952,7 +946,7 @@ def make_execution_plan(
         "planned_pages": planned_pages,
         "plan_quality": {
             "duplicate_targets": duplicate_page_targets(planned_pages),
-            "blocked_placeholder_pages": [p.get("rel_path") for p in planned_pages if page_has_blocked_placeholder(p)],
+            "blocked_placeholder_pages": [p.get("rel_path") for p in planned_pages if page_has_blocked_placeholder(p, cfg)],
             "raw_coverage": planned_raw_coverage([n.rel for n in raw_inputs], planned_pages),
         },
         "llm_runtime": llm_result,
@@ -1089,8 +1083,8 @@ def command_status(cfg: dict[str, Any]) -> int:
 
 
 def command_lint(cfg: dict[str, Any], write: bool = False) -> int:
-    ensure_dirs(cfg)
     if write:
+        ensure_dirs(cfg)
         cfg["_run_id"] = run_id()
     index = build_index(cfg)
     lint = healthcheck(index, cfg)
@@ -1160,7 +1154,7 @@ def command_init_kb(
     applied_batches = 0
     limit = max(1, max_batches)
     for batch_index in range(limit):
-        plan = build_initialization_plan(cfg, plan_run_id=run_id(), stamp=stamp(), executor_plan_fn=mvp_executor_plan, page_requires_manual_review=page_requires_manual_review, duplicate_page_targets=duplicate_page_targets, page_has_blocked_placeholder=page_has_blocked_placeholder, planned_raw_coverage=planned_raw_coverage, batch_size=batch_size, use_llm=use_llm and not no_llm, include_all=True)
+        plan = build_initialization_plan(cfg, plan_run_id=run_id(), stamp=stamp(), executor_plan_fn=mvp_executor_plan, page_requires_manual_review=page_requires_manual_review, duplicate_page_targets=duplicate_page_targets, page_has_blocked_placeholder=lambda p: page_has_blocked_placeholder(p, cfg), planned_raw_coverage=planned_raw_coverage, batch_size=batch_size, use_llm=use_llm and not no_llm, include_all=True)
         path = write_execution_plan(cfg, plan)
         queued = write_manual_review_queue(cfg, plan)
         print_plan_summary(plan, path, queued)
@@ -1237,13 +1231,13 @@ BLOCKED_HEURISTIC_MARKERS = (
     "分析模式：heuristic",
     "分析模式：heuristic-fallback",
 )
-def page_has_blocked_placeholder(page: dict[str, Any]) -> bool:
+def page_has_blocked_placeholder(page: dict[str, Any], cfg: dict[str, Any] | None = None) -> bool:
     content = str(page.get("content") or "")
     if any(marker in content for marker in BLOCKED_APPLY_MARKERS):
         return True
     if page.get("skill") == "topic-research-compile" and any(marker in content for marker in BLOCKED_HEURISTIC_MARKERS):
         return True
-    if page.get("skill") == "topic-research-compile" and str(page.get("rel_path", "")).startswith("wiki/topics/"):
+    if page.get("skill") == "topic-research-compile" and is_topic_page(page, cfg):
         weak_markers = ["待补充", "（待补充", "Topic from"]
         if sum(content.count(marker) for marker in weak_markers) >= 2:
             return True
@@ -1267,7 +1261,7 @@ def preflight_apply_pages(
         rel_path = page.get("rel_path")
         if not rel_path:
             raise SystemExit("plan 页面缺少 rel_path，不能安全写入。")
-        if page_has_blocked_placeholder(page):
+        if page_has_blocked_placeholder(page, cfg):
             raise SystemExit(f"plan 页面包含 mock 或弱占位内容，拒绝 apply-plan：{rel_path}")
         if page_requires_manual_review(page) and not allow_reviewed:
             raise SystemExit(f"plan 页面需要人工审核，拒绝直接 apply-plan：{rel_path}")
@@ -1353,7 +1347,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
         for page, target in targets:
             cfg["_write_started"] = True
             write_observed_page(cfg, page, target, created, writer=safe_write_text,
-                                identity=object_manifest_fields(page))
+                                identity=object_manifest_fields(page, prefixes=knowledge_roots(cfg)))
 
         reconcile = reconcile_created_pages(root, created)
         if not reconcile["ok"]:

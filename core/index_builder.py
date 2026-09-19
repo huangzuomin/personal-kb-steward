@@ -17,20 +17,36 @@ def generated_index_path(root: Path) -> Path:
     return root / ".openclaw" / "generated-index.md"
 
 
+# Key -> section label for the generated index. Values are resolved through
+# `config.write`, so a customised layout never produces links into a tree that
+# does not exist.
+INDEXED_DIR_KEYS = {
+    "seed_dir": "seeds",
+    "topics_dir": "topics",
+    "concepts_dir": "concepts",
+    "cases_dir": "cases",
+    "materials_dir": "material-packs",
+}
+def indexed_dirs(cfg: dict[str, Any]) -> dict[str, str]:
+    from .layout import knowledge_dirs
+    dirs = knowledge_dirs(cfg)
+    return {label: dirs[key] for key, label in INDEXED_DIR_KEYS.items()}
+
+
 def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
     """Updates managed index files without overwriting a user-owned root index.md."""
     root = index.root
     run_id = str(cfg.get("_run_id") or datetime.now(timezone.utc).strftime("index-%Y%m%d-%H%M%S"))
-    
+    dirs = indexed_dirs(cfg)
+
     # 1. Ensure core directories have a README.md
-    core_dirs = ["seeds", "topics", "concepts", "projects", "cases", "material-packs"]
-    for d in core_dirs:
-        dir_path = root / "wiki" / d
+    for label, rel_dir in dirs.items():
+        dir_path = root / rel_dir
         if not dir_path.exists():
             continue
         readme_path = dir_path / "README.md"
         if not readme_path.exists():
-            title = f"{d.title()} Index"
+            title = f"{label.title()} Index"
             content = (
                 frontmatter(
                     title,
@@ -55,7 +71,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
             )
 
     # 2. Build root index.md content
-    
+
     # - 最近更新 (Recent Updates): Get the 3 most recent logs
     log_path = root / "log.md"
     recent_logs = []
@@ -69,24 +85,26 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
                 if line.strip()
             ]
             recent_logs = lines[:3]
-            
+
     recent_updates_section = "\n".join(recent_logs) if recent_logs else "- 暂无更新记录"
 
     # - 核心入口 (Core Entrances)
     core_entrances = []
-    for d in core_dirs:
-        if (root / "wiki" / d).exists():
-            core_entrances.append(f"- [[wiki/{d}/README.md]]")
+    for label, rel_dir in dirs.items():
+        if (root / rel_dir).exists():
+            core_entrances.append(f"- [[{rel_dir}/README.md]]")
     entrances_section = "\n".join(core_entrances) if core_entrances else "- 暂无入口"
 
     # - 当前活跃专题 (Active Topics)
+    topics_dir = dirs.get("topics", "")
+    topics_prefix = f"{topics_dir}/" if topics_dir else None
     active_topics = []
     for note in index.notes:
-        if note.rel.startswith("wiki/topics/") and note.metadata:
+        if topics_prefix and note.rel.startswith(topics_prefix) and note.metadata:
             status = note.metadata.get("status", "")
             if status == "growing":
                 active_topics.append(f"- [[{note.rel}]]")
-    
+
     # Only keep up to 10 active topics to avoid bloat
     active_topics = active_topics[:10]
     active_topics_section = "\n".join(active_topics) if active_topics else "- 暂无活跃专题"
@@ -102,7 +120,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
         for line in content.splitlines():
             if '"status": "pending"' in line or '"status":"pending"' in line:
                 pending_count += 1
-                
+
     review_section = f"- [[.openclaw/manual-review/queue.jsonl]] ({pending_count} 项待处理)"
     if pending_count > 0:
         review_section = f"- Manual review queue: {pending_count} pending item(s)"
@@ -118,7 +136,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
         if reports:
             reports.sort(key=lambda p: p.name, reverse=True)
             latest_report = reports[0]
-            
+
     health_section = f"- [[outputs/{latest_report.name.replace('.md', '')}]]" if latest_report else "- 暂无健康报告"
 
     if latest_report:
@@ -148,7 +166,7 @@ def update_index(index: VaultIndex, cfg: dict[str, Any]) -> None:
 
 {health_section}
 """
-    
+
     root_index_path = root / "index.md"
     index_path = root_index_path
     operation = "write_root_index"

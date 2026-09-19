@@ -147,6 +147,16 @@ class WorkflowDeclarationTests(unittest.TestCase):
             (kb / "quicknote" / "idea.md").write_text("# AI课程\n\nAI课程选题 #seed", encoding="utf-8")
             (kb / "raw" / "report.pdf").write_bytes(b"%PDF-1.4")
             cfg = self.make_cfg(kb)
+            # Candidate promotion is config-driven. This vault declares one rule
+            # whose marker matches the fixture, so exactly one page is expected.
+            cfg["candidate_promotion"] = [{
+                "kind": "concept",
+                "title": "人工智能创新发展先行市",
+                "rel_dir_key": "concepts_dir",
+                "match_any": ["先行市"],
+                "min_sources": 3,
+                "body": ["## 概念定义候选", "该概念指向地方政府围绕 AI 进行系统部署的城市发展目标。"],
+            }]
 
             plan = steward.build_initialization_plan(
                 cfg,
@@ -169,8 +179,42 @@ class WorkflowDeclarationTests(unittest.TestCase):
             self.assertFalse(any(page["rel_path"].startswith("wiki/topics/topic-") for page in plan["planned_pages"]))
             init_pages = [page for page in plan["planned_pages"] if page.get("skill") == "kb-initialize"]
             self.assertTrue(init_pages)
-            self.assertFalse(any(steward.page_requires_manual_review(page) for page in init_pages))
+            # Auto-generated candidates ask for review instead of self-promoting.
+            self.assertTrue(all(page["review_required"] for page in init_pages))
             self.assertIn("raw/report.pdf", plan["batch_queue"]["pdf_needs_extraction"])
+
+    def test_candidate_promotion_absent_config_produces_no_pages(self):
+        """A batch with no declared rule must not manufacture a topic page.
+
+        Regression guard for the hardcoded 温州 demo corpus: unrelated documents
+        (memorial photography, NAS setup notes) were once promoted into a single
+        "温州 AI 政策与产业" topic purely because the batch was large enough.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp)
+            (kb / "quicknote").mkdir()
+            (kb / "inbox").mkdir()
+            (kb / "raw").mkdir()
+            for idx in range(7):
+                (kb / "raw" / f"unrelated-{idx}.md").write_text(
+                    f"# 雁荡山老照片 {idx}\n\n民国摄影史资料，与人工智能无关。", encoding="utf-8")
+            cfg = self.make_cfg(kb)
+
+            plan = steward.build_initialization_plan(
+                cfg,
+                plan_run_id="no-promotion",
+                stamp=steward.stamp(),
+                executor_plan_fn=steward.mvp_executor_plan,
+                page_requires_manual_review=steward.page_requires_manual_review,
+                duplicate_page_targets=steward.duplicate_page_targets,
+                page_has_blocked_placeholder=steward.page_has_blocked_placeholder,
+                planned_raw_coverage=steward.planned_raw_coverage,
+                batch_size=7,
+                use_llm=False,
+            )
+
+            init_pages = [p for p in plan["planned_pages"] if p.get("skill") == "kb-initialize"]
+            self.assertEqual(init_pages, [], "no config rule means no inferred topic page")
 
     def test_finalize_kb_updates_aggregation_pages_and_related_links(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -207,6 +251,27 @@ class WorkflowDeclarationTests(unittest.TestCase):
                     encoding="utf-8",
                 )
             cfg = self.make_cfg(kb)
+            # Aggregation titles are derived from the material (the topic page
+            # takes its name from 「提取的专题」) or declared here. Without an
+            # entry a page is simply not produced, so the fixture declares the
+            # non-topic pages it expects to see.
+            cfg["finalize_aggregation"] = {
+                "material": {
+                    "title": "温州AI政策与产业研究资料包",
+                    "rel_dir_key": "materials",
+                    "intro": "为研究、汇报和写作提供可追溯的资料包。",
+                },
+                "concept": {
+                    "title": "人工智能创新发展先行市",
+                    "rel_dir_key": "concepts",
+                    "match_any": ["人工智能局", "先行市"],
+                },
+                "case": {
+                    "title": "温州AI应用与机构建设案例线索",
+                    "rel_dir_key": "cases",
+                    "match_any": ["揭牌", "人工智能局"],
+                },
+            }
 
             plan = make_finalize_plan(cfg, plan_run_id="finalize-test", stamp=steward.stamp())
 
@@ -219,6 +284,59 @@ class WorkflowDeclarationTests(unittest.TestCase):
             self.assertIn("[[wiki/topics/温州人工智能创新发展路径.md]]", material["content"])
             self.assertIn("反方证据与信息缺口", material["content"])
             self.assertEqual(material["content"].count("推动政策、产业平台和应用场景建设"), 1)
+
+    def test_finalize_aggregation_without_config_produces_no_demo_pages(self):
+        """Aggregation titles must come from the material, not a demo corpus.
+
+        Regression guard: upstream hardcoded city and agency names as the
+        aggregation page titles, so any vault produced the same "温州 AI 政策与
+        产业" pages regardless of what the source notes actually said. With no
+        `finalize_aggregation` config only the derived topic page may appear.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp)
+            (kb / "quicknote").mkdir()
+            (kb / "inbox").mkdir()
+            (kb / "raw").mkdir()
+            (kb / "wiki" / "sources").mkdir(parents=True)
+            for idx, title in enumerate(["雁荡山民国摄影", "陶冷月画册出版", "地方文献整理"]):
+                (kb / "raw" / f"{idx}.md").write_text(f"# {title}\n\n原始资料", encoding="utf-8")
+                (kb / "wiki" / "sources" / f"source-{idx}.md").write_text(
+                    "\n".join([
+                        "---",
+                        f"title: Source {idx}",
+                        "type: source-note",
+                        "status: growing",
+                        "stage: compiled",
+                        "created: 2026-05-11",
+                        "updated: 2026-05-11",
+                        f"sources: [\"raw/{idx}.md\"]",
+                        "related: []",
+                        "tags: [\"source\"]",
+                        "confidence: high",
+                        "review_required: false",
+                        "---",
+                        f"# Source {idx}",
+                        "",
+                        "## 关键事实",
+                        f"- {title}，民国时期摄影史料。",
+                        "",
+                        "## 提取的专题",
+                        f"- {title}：围绕民国摄影史与地方文献形成线索。",
+                    ]),
+                    encoding="utf-8",
+                )
+            cfg = self.make_cfg(kb)
+
+            plan = make_finalize_plan(cfg, plan_run_id="finalize-no-config", stamp=steward.stamp())
+
+            agg_paths = [p["rel_path"] for p in plan["planned_pages"] if not p["rel_path"].startswith("wiki/sources/")]
+            self.assertEqual(
+                agg_paths, ["wiki/topics/雁荡山民国摄影.md"],
+                "only the material-derived topic page may be produced",
+            )
+            self.assertFalse(any("温州" in path for path in agg_paths))
+            self.assertEqual(plan["plan_quality"]["aggregation_pages"], 1)
 
 
 if __name__ == "__main__":

@@ -44,12 +44,9 @@ def sentence_chunks(text: str) -> list[str]:
 
 
 def keyword_score(sentence: str) -> int:
-    keywords = [
-        "人工智能", "AI", "政策", "规划", "产业", "应用", "数据", "算力",
-        "模型", "创新", "治理", "企业", "制造", "财政", "文化", "眼镜",
-        "示范", "平台", "目标", "亿元", "2025", "2026", "2027",
-    ]
-    return sum(2 for word in keywords if word in sentence) + min(len(sentence), 220) // 80
+    # Dates, quantities and fuller sentences are useful across domains. A private
+    # corpus's industry/year keywords must not bias every user's summaries.
+    return 2 * len(re.findall(r"\d+(?:[.,]\d+)?", sentence)) + min(len(sentence), 220) // 80
 
 
 def top_sentences(text: str, limit: int = 5) -> list[str]:
@@ -59,17 +56,32 @@ def top_sentences(text: str, limit: int = 5) -> list[str]:
     return [item[1] for item in selected]
 
 
-def infer_topics(title: str, text: str) -> list[dict[str, str]]:
+def topic_candidates(cfg: dict[str, Any] | None) -> list[tuple[str, str, tuple[str, ...]]]:
+    """Heuristic topic rules, read from config instead of a hardcoded corpus.
+
+    Upstream baked a demo vault into this list (city + agency names) and matched
+    it with generic words like 政策/规划/产业, so any document containing two of
+    those common words was labelled a "温州 AI 政策" topic regardless of what it
+    actually said. Rules now live in `cfg["heuristic_topics"]`; with no config
+    the only output is the neutral title-derived stub below.
+    """
+    specs = (cfg or {}).get("heuristic_topics")
+    if not isinstance(specs, list):
+        return []
+    candidates: list[tuple[str, str, tuple[str, ...]]] = []
+    for spec in specs:
+        if not isinstance(spec, dict) or not spec.get("title"):
+            continue
+        markers = tuple(str(m) for m in (spec.get("match_any") or []) if str(m).strip())
+        candidates.append((str(spec["title"]), str(spec.get("content") or ""), markers))
+    return candidates
+
+
+def infer_topics(title: str, text: str, cfg: dict[str, Any] | None = None) -> list[dict[str, str]]:
     hay = f"{title}\n{text}"
-    candidates: list[tuple[str, str, tuple[str, ...]]] = [
-        ("温州人工智能政策规划与机构建设", "关注温州 AI 政策目标、机构设置、行动计划与治理分工。", ("人工智能局", "政策", "规划", "先行市")),
-        ("温州AI赋能产业与公共服务应用", "关注 AI 在制造、财政、文化、城市治理等场景中的落地方式与成效。", ("赋能", "应用", "制造", "财政", "文化", "服务")),
-        ("温州人工智能产业生态与平台建设", "关注算力、产业园区、平台、企业团队和产业链配套。", ("产业", "算力", "平台", "园区", "企业", "生态")),
-        ("AI治理与基层治理现代化", "关注 AI、数据能力和基层治理现代化之间的机制关系。", ("治理", "基层", "数据", "监督")),
-    ]
     topics: list[dict[str, str]] = []
-    for title_candidate, content, markers in candidates:
-        if sum(1 for marker in markers if marker in hay) >= 2:
+    for title_candidate, content, markers in topic_candidates(cfg):
+        if markers and sum(1 for marker in markers if marker in hay) >= 2:
             topics.append({"title": title_candidate, "content": content})
     if not topics:
         short = re.sub(r"\s+", "", title).strip(" -_")[:32] or "资料待整理专题"
@@ -80,7 +92,7 @@ def infer_topics(title: str, text: str) -> list[dict[str, str]]:
     return topics[:3]
 
 
-def heuristic_analysis(note: dict[str, Any]) -> dict[str, Any]:
+def heuristic_analysis(note: dict[str, Any], cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     title = str(note.get("title") or "")
     cleaned = clean_body(str(note.get("body") or ""))
     source_text = cleaned or str(note.get("summary") or "").strip()
@@ -92,17 +104,25 @@ def heuristic_analysis(note: dict[str, Any]) -> dict[str, Any]:
         summary = summary[:420].rstrip("，。；,; ") + "。"
     return {
         "source_summary": summary,
-        "topics": infer_topics(title, source_text),
+        "topics": infer_topics(title, source_text, cfg),
         "key_facts": signals,
         "quality_flags": [] if cleaned else ["正文清洗后内容不足，可能需要人工复核。"],
         "analysis_mode": "heuristic",
     }
 
 
+def target_dirs(cfg: dict[str, Any]) -> dict[str, str]:
+    """Write targets must come from config.write, never from hardcoded paths."""
+    from core.layout import knowledge_dirs
+    return {"sources_dir": knowledge_dirs(cfg)["sources_dir"]}
+
+
+
 def execute(context: dict[str, Any]) -> dict[str, Any]:
     notes = context.get("notes", [])
     cfg = context.get("config", {})
     use_llm = context.get("use_llm", True)
+    dirs = target_dirs(cfg)
 
     created = []
     issues = []
@@ -134,7 +154,7 @@ def execute(context: dict[str, Any]) -> dict[str, Any]:
 
     for note in notes:
         if not use_llm:
-            data = heuristic_analysis(note)
+            data = heuristic_analysis(note, cfg)
             issues.append(f"未启用 LLM，已使用启发式结构化整理：{note.get('rel')}")
             pages = render({
                 "source_rel": note.get("rel"),
@@ -144,17 +164,19 @@ def execute(context: dict[str, Any]) -> dict[str, Any]:
                 "key_facts": data.get("key_facts", []),
                 "quality_flags": data.get("quality_flags", []),
                 "analysis_mode": data.get("analysis_mode", "heuristic"),
+                "sources_dir": dirs["sources_dir"],
             })
             created.extend(pages)
             processed += 1
             continue
 
         cleaned = clean_body(str(note.get("body") or ""))
-        text = f"Title: {note.get('title', '')}\n\n{cleaned[:6000]}"
+        max_chars = int(cfg.get("scan", {}).get("max_source_chars", 6000))
+        text = f"Title: {note.get('title', '')}\n\n{cleaned[:max_chars]}"
         try:
             resp = call_chat_completion(cfg, system_prompt, {"text": text})
             data = json.loads(resp)
-            
+
             pages = render({
                 "source_rel": note.get("rel"),
                 "source_title": note.get("title"),
@@ -162,6 +184,7 @@ def execute(context: dict[str, Any]) -> dict[str, Any]:
                 "key_facts": data.get("key_facts", []),
                 "quality_flags": data.get("quality_flags", []),
                 "analysis_mode": "llm",
+                "sources_dir": dirs["sources_dir"],
                 "topics": [
                     {"title": t.get("topic_title", ""), "content": t.get("topic_stub_content", "")}
                     for t in data.get("topics", [])
@@ -170,7 +193,7 @@ def execute(context: dict[str, Any]) -> dict[str, Any]:
             created.extend(pages)
             processed += 1
         except Exception as e:
-            data = heuristic_analysis(note)
+            data = heuristic_analysis(note, cfg)
             issues.append(f"LLM 提炼失败，已降级为启发式整理 {note.get('rel')}: {e}")
             pages = render({
                 "source_rel": note.get("rel"),
@@ -180,6 +203,7 @@ def execute(context: dict[str, Any]) -> dict[str, Any]:
                 "key_facts": data.get("key_facts", []),
                 "quality_flags": [*data.get("quality_flags", []), "LLM 调用失败，当前为启发式结果。"],
                 "analysis_mode": "heuristic-fallback",
+                "sources_dir": dirs["sources_dir"],
             })
             created.extend(pages)
             processed += 1

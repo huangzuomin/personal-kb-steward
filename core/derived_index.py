@@ -13,6 +13,7 @@ import tempfile
 from typing import Any, Iterator
 
 from .claims import Evidence, evidence_status, normalized_text, read_claims, render_claims
+from .layout import excluded_note, knowledge_prefixes, scan_dirs
 from .config import kb_root
 from .knowledge_objects import ObjectRegistry, is_knowledge_path
 from .reconcile import END, START, _managed
@@ -82,7 +83,8 @@ def cache_path(cfg: dict[str, Any]) -> Path:
 def _scope(cfg: dict[str, Any]) -> str:
     scan = cfg["scan"]
     return json.dumps({k: sorted(set(scan[k])) for k in ("include_dirs", "exclude_dirs", "extensions")}
-                      | {"log_file": cfg["write"]["log_file"]}, ensure_ascii=False, sort_keys=True)
+                      | {"log_file": cfg["write"]["log_file"], "knowledge_dirs": knowledge_prefixes(cfg),
+                         "exclude_files": sorted(cfg["scan"].get("exclude_files", []))}, ensure_ascii=False, sort_keys=True)
 
 
 def _paths(cfg: dict[str, Any], warnings: list[str]) -> list[Path]:
@@ -93,7 +95,7 @@ def _paths(cfg: dict[str, Any], warnings: list[str]) -> list[Path]:
     def allowed(path: Path) -> bool:
         return not (set(path.relative_to(root).parts) & excluded)
     def add(path: Path) -> None:
-        if path.suffix.lower() == ".md" and allowed(path):
+        if path.suffix.lower() == ".md" and allowed(path) and not excluded_note(cfg, path):
             try:
                 _path(root, path.relative_to(root).as_posix())
             except DerivedIndexError as exc:
@@ -104,7 +106,7 @@ def _paths(cfg: dict[str, Any], warnings: list[str]) -> list[Path]:
     def walk_error(exc: OSError) -> None:
         raise exc  # Never publish an apparently complete but unreadable tree.
     if ".md" in cfg["scan"]["extensions"]:
-        for name in sorted(set(cfg["scan"]["include_dirs"])):
+        for name in sorted(set(scan_dirs(cfg))):
             base = root if name == "." else _path(root, name)
             if not base.exists() or not allowed(base):
                 continue
@@ -138,7 +140,7 @@ def _snapshot(cfg: dict[str, Any], warnings: list[str]) -> tuple[list[Note], dic
         rel = path.relative_to(root).as_posix()
         sha = hashlib.sha256(raw).hexdigest()
         title = str(meta.get("title") or first_heading(body) or path.stem).strip()
-        notes.append(Note(path, rel, title, body, meta, sha, path.stat().st_mtime, len(raw)))
+        notes.append(Note(path, rel, title, body, meta, sha, path.stat().st_mtime, len(raw), knowledge_prefixes(cfg)))
         documents[rel] = {"path": rel, "content": text, "sha256": sha}
     ObjectRegistry.from_notes(notes).require_valid()
     return notes, documents
@@ -161,7 +163,7 @@ def _records(note: Note, text: str) -> list:
 
 def _dependency_rows(note: Note, records: list, text: str, warnings: list[str]) -> list[tuple]:
     """Only explicit sources/evidence are dependencies; ordinary links are not."""
-    if not is_knowledge_path(note.rel):
+    if not note.is_knowledge:
         return []
     value = note.metadata.get("sources", note.metadata.get("source", []))
     if isinstance(value, str):
