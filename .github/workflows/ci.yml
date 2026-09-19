@@ -33,7 +33,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python
@@ -42,34 +42,17 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Verify the exact checkout and PR parents
-        shell: python
-        run: |
-          import json, os, subprocess
-          from pathlib import Path
-          event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text(encoding='utf-8'))
-          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-          print('CHECKED_OUT_SHA=' + commit)
-          print('EVENT_SHA=' + os.environ['GITHUB_SHA'])
-          assert commit == os.environ['GITHUB_SHA']
-          if os.environ['GITHUB_EVENT_NAME'] == 'pull_request':
-              pr = event['pull_request']
-              parents = subprocess.check_output(['git', 'show', '-s', '--format=%P', 'HEAD'], text=True).split()
-              expected = [pr['base']['sha'], pr['head']['sha']]
-              print('BASE_HEAD_SHA=' + expected[0])
-              print('PR_HEAD_SHA=' + expected[1])
-              print('MERGE_PARENTS=' + ' '.join(parents))
-              assert parents == expected, 'Checkout is not the merge candidate for this PR event'
+      - name: Verify exact checkout and committed differences
+        run: python scripts/check_committed_diff.py
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Check syntax and whitespace
+      - name: Check syntax
         shell: python
         run: |
           import subprocess, sys
           subprocess.run([sys.executable, '-m', 'compileall', '-q', 'core', 'scripts', 'tests'], check=True)
-          subprocess.run(['git', 'diff', '--check'], check=True)
 
       - name: Run full tests without local config
         shell: python
