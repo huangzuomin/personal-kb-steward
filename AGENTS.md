@@ -204,3 +204,7 @@ python scripts\personal_kb_steward.py processed
 `scripts/kb_index.py rebuild` 只重建 `.kb/index.sqlite`，不得把数据库作为身份、判断或证据的权威来源。
 `search/show/status` 只读、不调用模型；使用命中内容时检查构建时间、current_status 和证据当前匹配状态。
 新增、更新、改名后显式重建再检索；不要用修改 SQLite 的方式修改知识页。参阅 `docs/derived-index.md`。
+
+`kb_index.py impact/stale` 只读追踪明确的来源依赖。先处理 blocked_by 中的上游，
+再通过 Reconcile 提案、审核、apply 更新原页，完成后 rebuild 并重新检查。
+不要把 stale 当成事实已错误，也不要把无版本来源当作已验证新鲜。见 `docs/dependency-stale.md`。

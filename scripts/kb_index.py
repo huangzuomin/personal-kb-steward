@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.config import config
+from core.dependencies import impact, stale
 from core.derived_index import rebuild, search, show, status
 
 
@@ -21,6 +22,9 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("rebuild", help="从 Markdown 完整重建 .kb/index.sqlite")
     commands.add_parser("status", help="查看构建时间、计数和警告")
+    commands.add_parser("stale", help="只读检查来源变更，列出需复查的判断和主题")
+    affected = commands.add_parser("impact", help="查看来源路径或对象 ID 的潜在下游影响")
+    affected.add_argument("source")
     detail = commands.add_parser("show", help="按路径或对象 ID 查判断和证据")
     detail.add_argument("target")
     find = commands.add_parser("search", help="关键词检索；空格分词，所有词均须命中")
@@ -36,6 +40,10 @@ def main(argv: list[str] | None = None) -> int:
             result = rebuild(cfg)
         elif args.command == "status":
             result = status(cfg)
+        elif args.command == "stale":
+            result = stale(cfg)
+        elif args.command == "impact":
+            result = impact(cfg, args.source)
         elif args.command == "show":
             result = show(cfg, args.target)
         else:
