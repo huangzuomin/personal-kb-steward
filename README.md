@@ -217,3 +217,9 @@ python scripts/synthesize.py "大黄鱼 渠道机会" --topic "大黄鱼产业"
 不把模型预览直接落盘。可用 `--discussion` 提供待核对的讨论要点；讨论本身不是证据。
 同一请求和来源未变则跳过；新问题可在同批资料上形成新判断。
 用法、上下文限制与安全边界见 [综合写回](docs/synthesis-writeback.md)。
+
+## 可选 Obsidian 小工作区
+
+[小工作区说明](integrations/obsidian/README.md) 提供首页、三视图 Base、报告占位和外层 Agent 对接 Skill。
+`python scripts/workspace_report.py` 只读输出已有依赖复查结果，不改知识页或审核队列。
+这是隔离验证的试用模板；原生 Obsidian 显示、点击与主机 Skill 触发尚未实测，不是新的运行时或自动安装器。
