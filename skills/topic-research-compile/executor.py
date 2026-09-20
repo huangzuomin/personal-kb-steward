@@ -5,6 +5,8 @@ import re
 from typing import Any
 
 from core.llm import call_chat_completion
+from core.jinja_renderer import require_renderer
+from core.content_safety import SensitiveContentError, assert_safe_content, safe_error_message
 from renderer import render
 
 
@@ -131,6 +133,8 @@ def execute(context: dict[str, Any]) -> dict[str, Any]:
     if not notes:
         return {"skill": "topic-research-compile", "created": [], "issues": issues, "processed": 0}
 
+    require_renderer()
+
     system_prompt = """你是一个专业的行业研究员。请阅读这篇长文调研报告/文章，先忽略网页导航、广告、责任编辑、图片链接等噪音，再提取以下信息：
 1. 用 150-300 字撰写结构化摘要，必须覆盖主体、行动、场景、目标/数字或影响，不要只复述文章开头。
 2. 提炼 1-3 个适合进入知识库的专题名称。
@@ -153,60 +157,44 @@ def execute(context: dict[str, Any]) -> dict[str, Any]:
 """
 
     for note in notes:
+        # A full note may also be sent through another runtime entry. Refuse
+        # detected credentials before cleaning/truncation, not after exposure.
+        assert_safe_content(note)
         if not use_llm:
             data = heuristic_analysis(note, cfg)
             issues.append(f"未启用 LLM，已使用启发式结构化整理：{note.get('rel')}")
-            pages = render({
-                "source_rel": note.get("rel"),
-                "source_title": note.get("title"),
-                "source_summary": data.get("source_summary", ""),
-                "topics": data.get("topics", []),
-                "key_facts": data.get("key_facts", []),
-                "quality_flags": data.get("quality_flags", []),
-                "analysis_mode": data.get("analysis_mode", "heuristic"),
-                "sources_dir": dirs["sources_dir"],
-            })
-            created.extend(pages)
-            processed += 1
-            continue
-
-        cleaned = clean_body(str(note.get("body") or ""))
-        max_chars = int(cfg.get("scan", {}).get("max_source_chars", 6000))
-        text = f"Title: {note.get('title', '')}\n\n{cleaned[:max_chars]}"
-        try:
-            resp = call_chat_completion(cfg, system_prompt, {"text": text})
-            data = json.loads(resp)
-
-            pages = render({
-                "source_rel": note.get("rel"),
-                "source_title": note.get("title"),
-                "source_summary": data.get("source_summary", ""),
-                "key_facts": data.get("key_facts", []),
-                "quality_flags": data.get("quality_flags", []),
-                "analysis_mode": "llm",
-                "sources_dir": dirs["sources_dir"],
-                "topics": [
-                    {"title": t.get("topic_title", ""), "content": t.get("topic_stub_content", "")}
-                    for t in data.get("topics", [])
-                ]
-            })
-            created.extend(pages)
-            processed += 1
-        except Exception as e:
-            data = heuristic_analysis(note, cfg)
-            issues.append(f"LLM 提炼失败，已降级为启发式整理 {note.get('rel')}: {e}")
-            pages = render({
-                "source_rel": note.get("rel"),
-                "source_title": note.get("title"),
-                "source_summary": data.get("source_summary", ""),
-                "topics": data.get("topics", []),
-                "key_facts": data.get("key_facts", []),
-                "quality_flags": [*data.get("quality_flags", []), "LLM 调用失败，当前为启发式结果。"],
-                "analysis_mode": "heuristic-fallback",
-                "sources_dir": dirs["sources_dir"],
-            })
-            created.extend(pages)
-            processed += 1
+        else:
+            cleaned = clean_body(str(note.get("body") or ""))
+            max_chars = int(cfg.get("scan", {}).get("max_source_chars", 6000))
+            text = f"Title: {note.get('title', '')}\n\n{cleaned[:max_chars]}"
+            try:
+                resp = call_chat_completion(cfg, system_prompt, {"text": text})
+                parsed = json.loads(resp)
+                if not isinstance(parsed, dict):
+                    raise ValueError("LLM analysis must be an object")
+                data = {
+                    "source_summary": parsed.get("source_summary", ""),
+                    "key_facts": parsed.get("key_facts", []),
+                    "quality_flags": parsed.get("quality_flags", []),
+                    "analysis_mode": "llm",
+                    "topics": [{"title": t.get("topic_title", ""), "content": t.get("topic_stub_content", "")}
+                               for t in parsed.get("topics", [])],
+                }
+            except SensitiveContentError:
+                raise
+            except Exception as exc:
+                data = heuristic_analysis(note, cfg)
+                data["analysis_mode"] = "heuristic-fallback"
+                data["quality_flags"] = [*data.get("quality_flags", []), "LLM 调用失败，当前为启发式结果。"]
+                issues.append(f"LLM 提炼失败，已降级为启发式整理 {note.get('rel')}: {safe_error_message(exc)}")
+        assert_safe_content(data)
+        pages = render({**data, "source_rel": note.get("rel"), "source_title": note.get("title"),
+                        "sources_dir": dirs["sources_dir"]})
+        for page in pages:
+            if page.get("quality_flags"):
+                issues.append(f"来源质量需复核：{note.get('rel')}，详见页面质量标记。")
+        created.extend(pages)
+        processed += 1
 
     return {
         "skill": "topic-research-compile",

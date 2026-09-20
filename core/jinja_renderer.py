@@ -6,13 +6,27 @@ import json
 from pathlib import Path
 from typing import Any
 
+_JINJA2_IMPORT_ERROR: ImportError | None = None
+
 try:
     from jinja2 import Environment, FileSystemLoader, StrictUndefined
     _JINJA2_AVAILABLE = True
-except ImportError:
+except ImportError as exc:
     _JINJA2_AVAILABLE = False
+    _JINJA2_IMPORT_ERROR = exc
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+
+class RendererDependencyError(RuntimeError):
+    """Do not silently discard fields when a required renderer is missing."""
+
+
+def require_renderer() -> None:
+    if not _JINJA2_AVAILABLE:
+        raise RendererDependencyError(
+            "Jinja2 不可用，已停止渲染；请使用当前 Python 执行 python -m pip install -r requirements.txt。"
+        ) from _JINJA2_IMPORT_ERROR
 
 
 def _make_env() -> "Environment":
@@ -31,8 +45,9 @@ def _make_env() -> "Environment":
 def render_template(template_name: str, context: dict[str, Any]) -> str:
     """
     Render a Jinja2 template from core/templates/<template_name>.
-    Falls back to a plain YAML+body dump if Jinja2 is not available.
+    Missing dependencies fail closed; no summary-only substitute is produced.
     """
+    require_renderer()
     ctx = {
         "today": dt.date.today().isoformat(),
         "title": context.get("title", ""),
@@ -47,29 +62,6 @@ def render_template(template_name: str, context: dict[str, Any]) -> str:
         "origin": context.get("origin", {"source_paths": context.get("sources", [])}),
         **context,
     }
-    if not _JINJA2_AVAILABLE:
-        # minimal fallback: just frontmatter + body
-        fm_lines = [
-            "---",
-            f"title: {json.dumps(ctx['title'], ensure_ascii=False)}",
-            f"type: {ctx['type']}",
-            f"status: {ctx['status']}",
-            f"stage: {ctx['stage']}",
-            f"created: {ctx['today']}",
-            f"updated: {ctx['today']}",
-            f"sources: {json.dumps(ctx['sources'], ensure_ascii=False)}",
-            f"related: {json.dumps(ctx['related'], ensure_ascii=False)}",
-            f"tags: {json.dumps(ctx['tags'], ensure_ascii=False)}",
-            f"confidence: {ctx['confidence']}",
-            f"review_required: {ctx['review_required']}",
-            f"origin: {json.dumps(ctx['origin'], ensure_ascii=False)}",
-            "---",
-            "",
-            f"# {ctx['title']}",
-            "",
-            ctx.get("summary", ""),
-        ]
-        return "\n".join(fm_lines)
     env = _make_env()
     tmpl = env.get_template(template_name)
     return tmpl.render(**ctx)

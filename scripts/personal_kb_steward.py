@@ -26,6 +26,8 @@ try:
     sys.stderr.reconfigure(encoding="utf-8")
 except AttributeError:
     pass
+from core.content_safety import assert_safe_content
+from core.review_runs import apply_review_runs, review_blockers, print_review_blockers, load_checked_queue
 from core.run_records import assert_run_can_start, save_run_manifest, record_failed_attempt, write_observed_page
 from uuid import uuid4
 from core.plan_objects import bind_plan_objects, validate_object_writes, object_manifest_fields, reconcile_created_pages
@@ -644,6 +646,7 @@ def plan_filename(plan: dict[str, Any]) -> str:
     safe_entry = slug(str(plan.get("entry") or "task"), "entry")
     return f"{plan['run_id']}-{safe_entry}.json"
 def write_execution_plan(cfg: dict[str, Any], plan: dict[str, Any]) -> Path:
+    assert_safe_content(plan)
     bind_plan_objects(build_index(cfg), plan)
     target_dir = plan_dir(cfg)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -880,10 +883,8 @@ def make_execution_plan(
                 "reason": "topic-research-compile produced review issues; inspect planned pages before apply-plan.",
                 "items": raw_compile_result.get("issues", [])[:20],
             })
-    for page in planned_pages:
-        # Only source notes are auto-cleared; topic/material pages keep their review flag.
-        if is_source_page(page, cfg) and not page_has_blocked_placeholder(page, cfg):
-            page["review_required"], page["confidence"] = False, "high"
+    # Keep the producing skill's quality decision. A source-note is not
+    # automatically high-confidence merely because its destination is sources/.
     llm_result: dict[str, Any] | None = None
     if use_llm and not scheduled:
         input_notes = select_llm_input_notes(index, cfg, task, primary_skill, input_scope, processed_index, retriever)
@@ -1052,7 +1053,7 @@ def write_report(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[s
             + f"- 来源问题：{len(lint['source_issues'])}\n"
             + f"- 缺元数据：{len(lint['missing_metadata'])}\n"
             + f"- 状态迁移建议：{len(lint.get('stage_migrations', []))}\n"
-            + f"- 非规范双链：{len(lint.get('noncanonical_links', []))}\n"
+            + f"- 非规范双链：{len(lint['noncanonical_links'])}\n"
         )
         buckets = lint.get("risk_buckets", {})
         content += (
@@ -1161,13 +1162,19 @@ def command_init_kb(
         print_plan_summary(plan, path, queued)
         if not apply:
             return 0
+        queue = load_checked_queue(review_queue_path(cfg))
+        if review_blockers(queue, plan["run_id"]):
+            print("init-kb --apply 暂停：计划已保存，并未丢弃；本 run 的全部阻塞项需人工复核。")
+            print_review_blockers(queue, plan["run_id"])
+            print(f"查看：review list --run-id {plan['run_id']} --all")
+            if plan.get("planned_pages"):
+                print(f"逐项 review show/approve 后：review apply-approved --run-id {plan['run_id']}")
+            else:
+                print("本计划没有可写页面；处理提示后重新生成 init-kb，不应用空计划。")
+            return 1
         if not plan.get("planned_pages"):
             print("init-kb：没有新的 planned_pages，初始化批处理结束。")
             return 0
-        blocking_review = [item for item in plan.get("manual_review", []) if item.get("type") == "planned_pages_require_review"]
-        if blocking_review:
-            print("init-kb --apply 暂停：计划已保存，并未丢弃；请 review show/approve 后 review apply-approved，再继续 init-kb。")
-            return 1
         command_apply_plan(cfg, str(path))
         applied_batches += 1
         remaining = int(plan.get("batching", {}).get("remaining_after_current", 0) or 0)
@@ -1236,8 +1243,13 @@ def page_has_blocked_placeholder(page: dict[str, Any], cfg: dict[str, Any] | Non
     content = str(page.get("content") or "")
     if any(marker in content for marker in BLOCKED_APPLY_MARKERS):
         return True
-    if page.get("skill") == "topic-research-compile" and any(marker in content for marker in BLOCKED_HEURISTIC_MARKERS):
-        return True
+    if page.get("skill") == "topic-research-compile":
+        mode = str(page.get("analysis_mode") or "").strip().lower()
+        if mode and mode != "llm":
+            return True
+        # Old plans may not carry analysis_mode; retain the historical guard.
+        if any(marker in content for marker in BLOCKED_HEURISTIC_MARKERS):
+            return True
     if page.get("skill") == "topic-research-compile" and is_topic_page(page, cfg):
         weak_markers = ["待补充", "（待补充", "Topic from"]
         if sum(content.count(marker) for marker in weak_markers) >= 2:
@@ -1253,6 +1265,7 @@ def preflight_apply_pages(
     *,
     allow_reviewed: bool = False,
 ) -> list[tuple[dict[str, Any], Path]]:
+    assert_safe_content(pages)
     targets: list[tuple[dict[str, Any], Path]] = []
     duplicates = duplicate_page_targets(pages)
     if duplicates:
@@ -1301,7 +1314,7 @@ def preflight_apply_pages(
 def write_run_manifest(cfg: dict[str, Any], manifest: dict[str, Any]) -> Path:
     return save_run_manifest(cfg, manifest)
 
-def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = False) -> int:
+def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = False, expected_run_id: str | None = None) -> int:
     cfg = {**cfg, "_attempt_id": str(uuid4()), "_write_started": False}
     created: list[dict[str, Any]] = []
     plan_path: Path | None = None
@@ -1312,6 +1325,8 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
             plan = read_json(plan_path, {})
         except json.JSONDecodeError as exc:
             raise SystemExit(f"plan JSON 解析失败：{plan_path}。{user_next_step(exc)}") from exc
+        if expected_run_id is not None and plan.get("run_id") != expected_run_id:
+            raise ValueError("审核 run_id 与计划不一致，拒绝应用。")
         pages = plan.get("planned_pages", [])
         if not pages:
             raise SystemExit("该 plan 没有 planned_pages，不能 apply-plan。请先重新生成 dry-run plan。")
@@ -1378,7 +1393,11 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
             op["processed"] = len(inputs)
             operations.append(op)
         cfg["_phase"] = "write_run_log"
-        write_run_log(index, cfg, operations, plan.get("task", "apply-plan"))
+        # Report plan warnings even after approval. Keep them out of the
+        # processed-state operation issues so approved inputs do not loop forever.
+        notices = [f"计划提示：{item.get('type', 'unknown')}" for item in plan.get("manual_review", [])]
+        report_operations = [{**op, "issues": [*op.get("issues", []), *notices]} for op in operations]
+        write_run_log(index, cfg, report_operations, plan.get("task", "apply-plan"))
         cfg["_phase"] = "update_processed_index"
         update_processed_index(index, cfg, operations)
         cfg["_phase"] = "save_state"
@@ -1419,7 +1438,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
         print(f"回滚命令：python scripts\\personal_kb_steward.py rollback {apply_run_id}")
         return 0
     except (Exception, SystemExit) as exc:
-        failed_run_id = str(locals().get("apply_run_id") or Path(ref).stem or "apply-plan-error")
+        failed_run_id = str(expected_run_id or locals().get("apply_run_id") or Path(ref).stem or "apply-plan-error")
         fail_apply_plan(cfg, failed_run_id, plan_path, root, created, exc)
         raise
 
@@ -1499,14 +1518,22 @@ def command_rollback(cfg: dict[str, Any], ref: str) -> int:
 
 def command_review(cfg: dict[str, Any], args: Any) -> int:
     target = review_queue_path(cfg)
-    items = load_queue(target)
     sub = getattr(args, "review_command", None) or "list"
+    if sub == "apply-approved":
+        return apply_review_runs(
+            target, plan_dir(cfg), run_id=getattr(args, "run_id", None),
+            all_runs=getattr(args, "all", False),
+            apply_plan=lambda path, rid: command_apply_plan(cfg, str(path), allow_reviewed=True, expected_run_id=rid),
+        )
+    items = load_checked_queue(target)
 
     if sub == "list":
         show_all = getattr(args, "all", False)
         type_filter = getattr(args, "type", None)
         risk_filter = getattr(args, "risk", None)
         filtered = items if show_all else pending_items(items)
+        if getattr(args, "run_id", None) is not None:
+            filtered = [item for item in filtered if item.get("run_id") == args.run_id]
         if type_filter:
             filtered = filter_items(filtered, item_type=type_filter)
         if risk_filter:
@@ -1550,40 +1577,12 @@ def command_review(cfg: dict[str, Any], args: Any) -> int:
     elif sub == "batch-approve":
         risk_filter = getattr(args, "risk", None)
         type_filter = getattr(args, "type", None)
-        count = batch_approve(items, risk=risk_filter, item_type=type_filter)
+        scoped = items if getattr(args, "run_id", None) is None else [item for item in items if item.get("run_id") == args.run_id]
+        count = batch_approve(scoped, risk=risk_filter, item_type=type_filter)
         if count:
             save_queue(target, items)
         print(f"批量批准：{count} 项")
         return 0
-
-    elif sub == "apply-approved":
-        to_apply = approved_items(items)
-        if not to_apply:
-            print("无已批准待应用项。")
-            return 0
-        run_ids = sorted({str(item.get("run_id", "")).strip() for item in to_apply if item.get("run_id")})
-        if not run_ids:
-            print("已批准项缺少 run_id，无法定位对应 plan。")
-            return 1
-        applied = 0
-        for rid in run_ids:
-            related = [item for item in items if item.get("run_id") == rid]
-            pending = [item for item in related if item.get("status") == "pending"]
-            rejected = [item for item in related if item.get("status") == "rejected"]
-            if pending or rejected:
-                print(f"跳过 run {rid}：仍有 pending={len(pending)} rejected={len(rejected)} 的审核项。")
-                continue
-            command_apply_plan(cfg, rid, allow_reviewed=True)
-            now = stamp()
-            for item in related:
-                if item.get("status") == "approved":
-                    item["status"] = "applied"
-                    item["applied_at"] = now
-                    applied += 1
-        if applied:
-            save_queue(target, items)
-        print(f"已应用审核通过项：{applied} 项")
-        return 0 if applied else 1
 
     else:
         print(f"未知 review 子命令：{sub}")
@@ -1645,6 +1644,7 @@ def main(argv: list[str]) -> int:
     review_sub = review_parser.add_subparsers(dest="review_command")
     review_list = review_sub.add_parser("list", help="列出队列")
     review_list.add_argument("--all", action="store_true", help="显示所有状态（包括已处理）")
+    review_list.add_argument("--run-id", help="只查看完整 run_id 对应的审核项")
     review_list.add_argument("--type", help="按类型过滤")
     review_list.add_argument("--risk", help="按风险等级过滤（P0/P1/P2/P3）")
     review_show = review_sub.add_parser("show", help="显示单条详情")
@@ -1658,7 +1658,11 @@ def main(argv: list[str]) -> int:
     review_batch = review_sub.add_parser("batch-approve", help="批量批准")
     review_batch.add_argument("--risk", help="只批准指定风险等级")
     review_batch.add_argument("--type", help="只批准指定类型")
-    review_apply = review_sub.add_parser("apply-approved", help="执行所有已批准项")
+    review_batch.add_argument("--run-id", help="只批准完整 run_id 对应的匹配项；不改变质量门禁")
+    review_apply = review_sub.add_parser("apply-approved", help="应用指定审核 run；多个 run 必须明确选择范围")
+    review_scope = review_apply.add_mutually_exclusive_group()
+    review_scope.add_argument("--run-id", help="只应用这个完整 run_id，不能用前缀")
+    review_scope.add_argument("--all", action="store_true", help="显式应用所有已批准且无阻塞项的 run")
     sub.add_parser("processed")
     args = parser.parse_args(argv)
     cfg = config()
