@@ -1053,7 +1053,7 @@ def write_report(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[s
             + f"- 来源问题：{len(lint['source_issues'])}\n"
             + f"- 缺元数据：{len(lint['missing_metadata'])}\n"
             + f"- 状态迁移建议：{len(lint.get('stage_migrations', []))}\n"
-            + f"- 非规范双链：{len(lint['noncanonical_links'])}\n"
+            + f"- 非规范双链：{len(lint.get('noncanonical_links', []))}\n"
         )
         buckets = lint.get("risk_buckets", {})
         content += (
