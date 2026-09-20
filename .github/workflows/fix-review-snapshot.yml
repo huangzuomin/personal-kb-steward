@@ -1,0 +1,28 @@
+name: Temporary pinned source snapshot
+
+on:
+  push:
+    branches: ["fix/render-signals-review-scope"]
+    paths: [".github/workflows/fix-review-snapshot.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a39261384433d6b2ba35a323653733ab4ae33f57
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Archive only tracked public source (no credentials or working files)
+        run: git archive --format=zip HEAD -o "$RUNNER_TEMP/upstream.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pks-upstream-a392613
+          path: ${{ runner.temp }}/upstream.zip
+          retention-days: 1
+          if-no-files-found: error
