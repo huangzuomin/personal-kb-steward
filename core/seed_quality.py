@@ -7,34 +7,9 @@ from __future__ import annotations
 
 import re
 
-_ROUTINE = re.compile(r"^(?:每日例程|晨间日记|今日打卡|习惯追踪|暂无|无内容|daily routine|habit tracker)[:：\s]*$", re.I)
+from .signal_extraction import signal_sentences
+
 _EMPTY_REASON = re.compile(r"无(?:额外)?实质内容|无额外内容|仅[有含].{0,30}(?:打卡|例程)|no substantive content|only routine", re.I)
-
-
-def signal_sentences(body: str, *, limit: int = 3) -> list[str]:
-    """Read beyond the template. Keep complete verbatim sentences, including substantive bullets."""
-    result: list[str] = []
-    fenced = False
-    for raw in body.splitlines():
-        line = raw.strip()
-        if line.startswith(("```", "~~~")):
-            fenced = not fenced
-            continue
-        if fenced or not line or re.match(r"^(?:#{1,6}\s|[-*_]{3,}$|[-*+]\s+\[[ xX]\])", line):
-            continue
-        line = re.sub(r"^(?:[-*+] |\d+[.)] |>[ ]?)", "", line).strip()
-        if _ROUTINE.fullmatch(line) or re.fullmatch(r"https?://\S+", line):
-            continue
-        for sentence in re.split(r"(?<=[。！？!?])\s*|(?<=\.)\s+", line):
-            # No head slicing or invented ellipsis. Very long unpunctuated paragraphs
-            # require human review instead of being presented as extracted facts.
-            sentence = sentence.strip()
-            if (8 <= len(sentence) <= 240 and re.search(r"[\w\u4e00-\u9fff]", sentence)
-                    and sentence not in result):
-                result.append(sentence)
-                if len(result) >= limit:
-                    return result
-    return result
 
 
 def seed_item(cluster: dict, notes: list[dict], cfg: dict) -> dict:

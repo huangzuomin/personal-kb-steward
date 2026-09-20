@@ -5,6 +5,8 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
+from .content_safety import SensitiveContentError
+
 
 STOPWORDS = {
     "the", "and", "for", "with", "from", "this", "that", "what", "when", "why",
@@ -81,7 +83,9 @@ def _llm_cluster(inputs: list[ClusterInput], cfg: dict, max_clusters: int) -> li
     try:
         raw = call_chat_completion(cfg, _CLUSTER_SYSTEM_PROMPT, payload)
         data = extract_json(raw)
-    except (LLMError, Exception):
+    except SensitiveContentError:
+        raise
+    except Exception:
         return None
 
     raw_clusters = data.get("clusters", [])

@@ -7,6 +7,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from .content_safety import assert_safe_content, sensitive_reason
+
 
 def _load_env() -> None:
     root = Path(__file__).resolve().parents[1]
@@ -62,6 +64,10 @@ def mock_skill_response(skill: str, task: str, documents: list[dict[str, str]]) 
 
 
 def call_chat_completion(cfg: dict[str, Any], system_prompt: str, user_payload: dict[str, Any]) -> str:
+    # Scan content, not configuration/authentication. Do this before constructing
+    # the request and scan the returned text before callers can log or render it.
+    assert_safe_content(system_prompt)
+    assert_safe_content(user_payload)
     llm_cfg = cfg.get("llm", {})
     base_url = os.environ.get("OPENAI_BASE_URL") or llm_cfg.get("base_url") or "https://api.openai.com/v1"
     model = os.environ.get("OPENAI_MODEL") or os.environ.get("LLM_MODEL") or llm_cfg.get("model")
@@ -97,7 +103,11 @@ def call_chat_completion(cfg: dict[str, Any], system_prompt: str, user_payload: 
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
+        if sensitive_reason(detail) or api_key in detail:
+            detail = "[provider error body omitted: sensitive content]"
         raise LLMError(f"LLM HTTP error {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise LLMError(f"LLM connection error: {exc}") from exc
-    return payload["choices"][0]["message"]["content"]
+    content = payload["choices"][0]["message"]["content"]
+    assert_safe_content(content)
+    return content

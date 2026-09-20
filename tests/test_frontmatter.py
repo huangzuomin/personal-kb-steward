@@ -50,8 +50,9 @@ class FrontmatterTests(unittest.TestCase):
 
         source = result["created"][0]["content"]
         self.assertIn("type: source-note", source)
-        self.assertIn("status: growing", source)
-        self.assertIn("confidence: high", source)
+        self.assertIn("status: manual_review", source)
+        self.assertIn("confidence: low", source)
+        self.assertIn("review_required: true", source)
 
         self.assertFalse(any("Mock summary for dry-run" in page["content"] for page in result["created"]))
 

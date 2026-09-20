@@ -110,7 +110,12 @@ class WorkflowDeclarationTests(unittest.TestCase):
             self.assertGreaterEqual(len(plan["planned_pages"]), 1)
             self.assertTrue(any(page["rel_path"].startswith("wiki/sources/source-") for page in plan["planned_pages"]))
             self.assertFalse(any("Mock summary for dry-run" in page["content"] for page in plan["planned_pages"]))
-            self.assertNotIn("planned_pages_require_review", review_types)
+            # Heuristic extraction is still routed, but is not certified ready.
+            self.assertIn("planned_pages_require_review", review_types)
+            source_pages = [p for p in plan["planned_pages"] if p.get("skill") == "topic-research-compile"]
+            self.assertTrue(all(p["review_required"] and p["confidence"] == "low" for p in source_pages))
+            self.assertTrue(all(p["analysis_mode"] == "heuristic" for p in source_pages))
+            self.assertTrue(all(steward.page_has_blocked_placeholder(p, cfg) for p in source_pages))
             self.assertNotIn("raw_input_blocked", review_types)
 
     def test_organize_kb_blocks_raw_full_initialization(self):
