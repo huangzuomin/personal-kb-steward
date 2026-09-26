@@ -13,4 +13,3 @@ Astra inspected the first draft. After your first tests pass, independently veri
 Add focused regression probes for these cases; run own module suites plus claims/contracts/source traceability. Update report.md/report.json with exact states and public mock samples. Root will independently test and review actual rendered cards; do not claim live semantic acceptance.
 
 Independent root reproduction now saved: docs/iteration-evidence/astra-M2-initial-probe.json and .execution/astra-M2-initial-probe.py. It shows state=full, invented definition retained and rejected boundary retained. Prior worker process stopped at this review checkpoint with all edits preserved; exit -1 is intentional, not completed handoff. Other seed owner is editing concurrently; run your relevant focused modules/claims/contracts/source traceability only, do not keep rerunning full suite while unrelated modules change. Report shared failures without editing other's modules.
-

@@ -19,4 +19,3 @@ Offline tests mock subprocess and response shapes, exercise invocation bounds/ti
 Installed CLI help verified by Astra: `--tools ""` disables all built-in tools; `--strict-mcp-config` skips ambient MCP; `--system-prompt` accepts the generator system prompt; `--output-format json` returns one result envelope; `--no-session-persistence` is available. Do not use `--bare`: installed 2.1.278 documents that bare ignores OAuth and requires API-key auth, which would break the already-authorized subscription path. Keep normal authenticated invocation with tools disabled; no key fallback.
 
 Native executable verified through npm shim: C:/Users/zooma/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe. Use native argv with shell=False; payload via stdin; model cwd an empty temp outside vault ancestry; disable slash commands as well as tools/MCP. Separate provider utility checkpoint is T10-checkpoint-A.md.
-

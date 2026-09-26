@@ -16,4 +16,3 @@ Deliver A:
 Evidence docs/iteration-evidence/M2-integration/checkpoint-A.md + report JSON + logs/artifacts. Record exact commands/counts and actual invocation path. Notify completion; do not start B without Astra review.
 
 Read Astra source/seed/topic acceptance reports for verified state. Seed worker report's claim that CLI omits vault_index/retriever is stale: current CLI passes both; do not reimplement. Preserve generator ownership. Do not rerun entire test suite during concurrent M2 edits; focused integration tests only, report genuinely transient dependency failures. Source-only eligibility and source plan/apply tests can proceed independently. All other root ledger/work-order files are root-owned, do not edit them.
-
