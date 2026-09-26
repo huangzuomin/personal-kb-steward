@@ -135,6 +135,9 @@ def test_finalize_does_not_claim_unrelated_sources_or_drop_custom_source_headers
     from core.finalizer import make_finalize_plan
     original = source_note(vault, "climate", "Climate", "UniqueClimateFinding")
     source_note(vault, "photography", "Photography", "UnrelatedPhotoFinding")
+    # This regression covers the historical marker-rule aggregate over legacy
+    # source-note pages; the typed default intentionally excludes those pages.
+    vault.cfg["card_pipeline"] = {"mode": "legacy"}
     result = make_finalize_plan(vault.cfg, plan_run_id="scope", stamp="test")
     topic = next(p for p in result["planned_pages"] if p["rel_path"].startswith("wiki/topics/"))
     assert len(topic["sources"]) == 1
@@ -151,6 +154,8 @@ def test_finalize_refuses_overwriting_handwritten_aggregate(vault):
     from core.finalizer import make_finalize_plan
     source_note(vault, "a", "Climate", "Climate fact")
     source_note(vault, "b", "Climate", "Other climate fact")
+    # Explicitly exercise the old aggregate collision guard.
+    vault.cfg["card_pipeline"] = {"mode": "legacy"}
     target = vault.install_note("wiki/topics/Climate.md", vault.content("My handwritten notes"))
     before = target.read_bytes()
     with pytest.raises(ObjectIdentityError, match="unchanged owned aggregate"):
@@ -290,8 +295,27 @@ def test_real_llm_topic_plan_enforces_config_budget_and_canonical_related(vault)
 def test_source_compiler_proposal_keeps_generation_source_hash(vault):
     custom_layout(vault)
     index = build_index(vault.cfg)
-    result = steward.mvp_executor_plan(index, vault.cfg, "初始化知识库", "topic-research-compile",
-                                      index.notes, {}, "compile", use_llm=False)
+    def source_response(_cfg, _prompt, payload):
+        body = payload["text"].split("\n\n", 1)[-1]
+        assert "An evidence record." in body
+        return json.dumps({
+            "chunk_viable": True,
+            "summary": "An evidence record.",
+            "key_statements": [{
+                "text": "An evidence record.",
+                "quote": "An evidence record.",
+                "kind": "assertion",
+            }],
+            "topics": [],
+            "limitations": [],
+            "quality_flags": [],
+        })
+    # The source executor's current model contract requires a verified chunk
+    # response; heuristic output is intentionally not a complete source card.
+    with patch("core.llm.call_chat_completion", side_effect=source_response):
+        result = steward.mvp_executor_plan(index, vault.cfg, "初始化知识库",
+                                           "topic-research-compile", index.notes,
+                                           {}, "compile", use_llm=True)
     page = result["planned_pages"][0]
     assert page["rel_path"].startswith("Notes/Knowledge.v2/sources/")
     assert page["retrieval_source_hashes"] == {"raw/a.md": index.by_rel["raw/a.md"].sha256}

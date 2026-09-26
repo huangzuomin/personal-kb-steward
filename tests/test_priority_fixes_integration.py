@@ -1,4 +1,5 @@
 """Real plan/review/apply regressions for #20, #25, #27; isolated temporary vaults."""
+import hashlib
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -34,6 +35,19 @@ def reviewed_plan(case, rid):
     return path
 
 
+def manifest_for_plan(case, plan_path, run_id):
+    plan_hash = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+    linked = []
+    for candidate in steward.runs_dir(case.cfg).glob(f'{run_id}*.json'):
+        data = json.loads(candidate.read_text(encoding='utf-8'))
+        if (data.get('parent_run_id') == run_id
+                and data.get('parent_plan_path') == str(plan_path)
+                and data.get('parent_plan_sha256') == plan_hash):
+            linked.append(candidate)
+    assert len(linked) == 1
+    return json.loads(linked[0].read_text(encoding='utf-8'))
+
+
 def test_real_apply_only_writes_requested_run(case):
     reviewed_plan(case, 'run-a')
     reviewed_plan(case, 'run-b')
@@ -49,8 +63,8 @@ def test_real_apply_only_writes_requested_run(case):
 
 
 def test_first_real_run_completion_survives_second_write_failure(case):
-    reviewed_plan(case, 'run-a')
-    reviewed_plan(case, 'run-b')
+    plan_a = reviewed_plan(case, 'run-a')
+    plan_b = reviewed_plan(case, 'run-b')
     writer = steward.safe_write_text
     def fail_b(cfg, target, content, **kwargs):
         if target.name == 'run-b.md':
@@ -60,8 +74,8 @@ def test_first_real_run_completion_survives_second_write_failure(case):
         assert steward.command_review(case.cfg, SimpleNamespace(review_command='apply-approved', all=True)) == 1
     items = steward.load_queue(steward.review_queue_path(case.cfg))
     assert {i['run_id']: i['status'] for i in items} == {'run-a': 'applied', 'run-b': 'approved'}
-    assert json.loads((case.root / '.openclaw/runs/run-a.json').read_text())['status'] == 'applied'
-    assert json.loads((case.root / '.openclaw/runs/run-b.json').read_text())['status'] == 'failed'
+    assert manifest_for_plan(case, plan_a, 'run-a')['status'] == 'applied'
+    assert manifest_for_plan(case, plan_b, 'run-b')['status'] == 'failed'
 
 
 def test_apply_rechecks_expected_id_after_plan_resolution(case):
@@ -77,7 +91,7 @@ def test_init_pause_lists_quality_and_page_review_ids(case, capsys):
     assert steward.command_init_kb(case.cfg, no_llm=True, apply=True, max_batches=1) == 1
     out = capsys.readouterr().out
     queue = steward.load_queue(steward.review_queue_path(case.cfg))
-    assert {'seed_quality_issues', 'planned_pages_require_review'} <= {i['type'] for i in queue}
+    assert {'seed_quality_issues', 'planned_page_review'} <= {i['type'] for i in queue}
     for item in queue:
         assert item['id'] in out and item['type'] in out
     assert '--run-id' in out
@@ -118,13 +132,27 @@ def test_real_read_note_and_seed_executor_share_filtered_input(case):
     def cluster(inputs, **kwargs):
         seen.extend(inputs)
         return ([{'title': '来源核查', 'sources': [rel], 'reasoning': '信息来源需要核对。', 'confidence': 'high'}], [])
+    cfg = {**case.cfg, 'seed_generation': {'mode': 'topic'}}
     with patch('core.clustering.cluster_inputs', side_effect=cluster):
-        result = steward.mvp_executor_plan(build_index(case.cfg), case.cfg, '整理碎片', 'mindseed-grow', [note], {}, 'signal-test', use_llm=False)
+        result = steward.mvp_executor_plan(build_index(cfg), cfg, '整理碎片', 'mindseed-grow', [note], {}, 'signal-test', use_llm=False)
     assert seen[0].content == safe
     page, = result['planned_pages']
     assert safe in page['content']
     assert '内部哨兵' not in page['content'] and '192.0.2.1' not in page['content']
     assert 'network=devnet' not in page['content']
+    assert path.read_bytes() == before
+
+
+def test_atomic_preview_also_filters_machine_lines_and_sents(case):
+    rel = 'quicknote/atomic-safe.md'
+    safe = '编辑部应核对每项信息来源，再形成候选议题。'
+    path = case.install_note(rel, '# 观察\n````\n内部哨兵不可进入信号。\n````\ncurl http://192.0.2.1\nnetwork=devnet\n' + safe)
+    before = path.read_bytes()
+    result = steward.mvp_executor_plan(build_index(case.cfg), case.cfg, '整理碎片', 'mindseed-grow',
+                                       [read_note(path, case.root)], {}, 'atomic-signal', use_llm=False)
+    rendered = ''.join(p['content'] for p in result['planned_pages'])
+    assert safe in rendered
+    assert '内部哨兵' not in rendered and '192.0.2.1' not in rendered and 'network=devnet' not in rendered
     assert path.read_bytes() == before
 
 

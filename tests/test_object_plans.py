@@ -256,6 +256,10 @@ class ObjectPlanTests(unittest.TestCase):
         self.assertTrue(all(page.get("object_id") for page in task_plan["planned_pages"]))
         for name in ("a", "b"):
             self.install_note(f"wiki/sources/{name}.md", self.content("## 关键事实\n- A measured fact.").replace("topic-page", "source-note"))
+        # Explicit legacy opt-in: this test asserts the OLD finalize producer
+        # (marker-rule aggregation) through the same identity boundary. The
+        # typed default finalize is covered by tests/test_card_pipeline_integration.py.
+        self.cfg["card_pipeline"] = {"mode": "legacy"}
         final_plan = steward.make_finalize_plan(self.cfg, plan_run_id="finalize-test", stamp="2026-09-19")
         self.persist(final_plan)
         self.assertTrue(final_plan["planned_pages"])

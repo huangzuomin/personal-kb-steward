@@ -12,7 +12,16 @@ from typing import Any
 
 
 class SensitiveContentError(ValueError):
-    """Content needs local inspection before external processing or publication."""
+    """Content needs local inspection before external processing or publication.
+
+    `reason` carries the rule code only (same vocabulary as `sensitive_reason`),
+    never the matched value. Callers use it to tell a real credential trip from a
+    heuristic one (`opaque_machine_line` has real false positives).
+    """
+
+    def __init__(self, message: str, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 _KEY = r"(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|password|passwd|secret|client[_-]?secret)"
@@ -76,13 +85,15 @@ def assert_safe_content(value: Any) -> None:
         reason = sensitive_reason(value)
         if reason:
             raise SensitiveContentError(
-                f"敏感内容检查阻断：{reason}；请在本地复核输入，未输出命中值。"
+                f"敏感内容检查阻断：{reason}；请在本地复核输入，未输出命中值。", reason
             )
     elif isinstance(value, dict):
         for key, item in value.items():
             if (isinstance(key, str) and _KEY_NAME.fullmatch(key)
                     and (type(item) in {int, float} or isinstance(item, str) and _literal_value(item))):
-                raise SensitiveContentError("敏感内容检查阻断：credential_field；请在本地复核输入，未输出命中值。")
+                raise SensitiveContentError(
+                    "敏感内容检查阻断：credential_field；请在本地复核输入，未输出命中值。",
+                    "credential_field")
             assert_safe_content(key)
             assert_safe_content(item)
     elif isinstance(value, (list, tuple)):

@@ -1,0 +1,24 @@
+{
+  "thoughts": [
+    {
+      "title": "图书馆检索机频繁死机影响找书",
+      "kind": "assertion",
+      "statement": "社区图书馆检索机频繁死机，已实际阻碍读者找到想借的书。",
+      "unit_ids": [1, 6],
+      "growth_directions": [
+        {"action": "向管理员核对死机频率统计与下午高峰的排班记录。", "basis": "回应“死机是否稳定复现”这一未知点。"}
+      ],
+      "negative_scope": ["暂不评估新检索系统的厂商选型。"]
+    },
+    {
+      "title": "旧借书记录能否迁移仍无答案",
+      "kind": "question",
+      "statement": "换检索系统后旧借书记录能否保留，读者和管理员都还没有答案。",
+      "unit_ids": [3],
+      "growth_directions": [
+        {"action": "追问系统更换方案中是否包含旧记录迁移条目。", "basis": "直接回应读者的未决问题。"}
+      ],
+      "negative_scope": ["不推测迁移的技术方案。"]
+    }
+  ]
+}

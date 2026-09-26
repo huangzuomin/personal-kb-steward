@@ -1,0 +1,56 @@
+{
+  "_comment": "由 tests/test_baseline_fixtures.py 计算的原始字节 SHA256 快照（运行时生成，非手填）",
+  "algorithm": "sha256",
+  "fixtures": {
+    "dialogue_user_ai_01": {
+      "path": "tests/fixtures/card-baseline/dialogue_user_ai_01.md",
+      "sha256": "f61f4d4181f408d05bdb9b7fe0e79d3bdf6d133be174d7c0bc513fc639532bdc",
+      "bytes": 2726
+    },
+    "research_summary_uncited_01": {
+      "path": "tests/fixtures/card-baseline/research_summary_uncited_01.md",
+      "sha256": "b70cf5a35d0a241d79435c4a5625c2215d1de3c0d473e330af1855b62a1a860d",
+      "bytes": 1856
+    },
+    "project_case_01": {
+      "path": "tests/fixtures/card-baseline/project_case_01.md",
+      "sha256": "bfa72ccbfb1ae2e7291598ee81f35f96f8ab3a6a7416d1edf5fd99e064b879cc",
+      "bytes": 2516
+    },
+    "project_case_01_followup": {
+      "path": "tests/fixtures/card-baseline/project_case_01_followup.md",
+      "sha256": "67439f67b40cab50716510dd4c126b892a7bd0de0df6ce18056602ced95bd1f9",
+      "bytes": 1904
+    },
+    "project_case_01_counterexample": {
+      "path": "tests/fixtures/card-baseline/project_case_01_counterexample.md",
+      "sha256": "3a8f5b41fb31ea7056642f9089999fdbc18abd39e6aa3c5ca65796a474f0fc65",
+      "bytes": 2165
+    },
+    "neg_empty": {
+      "path": "tests/fixtures/card-baseline/neg_empty.md",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "neg_irrelevant": {
+      "path": "tests/fixtures/card-baseline/neg_irrelevant.md",
+      "sha256": "588a813aa4730879c6fa981f79bfffca125fa3b31c5e3db49e8ca0fad226a87b",
+      "bytes": 250
+    },
+    "neg_damaged": {
+      "path": "tests/fixtures/card-baseline/neg_damaged.md",
+      "sha256": "c9626a432376e910aaca4068c35e8e8abeb0215ab8460bc2127b5c54216c2397",
+      "bytes": 218
+    },
+    "neg_repeated_quote": {
+      "path": "tests/fixtures/card-baseline/neg_repeated_quote.md",
+      "sha256": "dc4ec160389b4cef518711ec7c41cfbd97817fd363fb1db986d52076eb9dd3a4",
+      "bytes": 878
+    },
+    "manifest.json": {
+      "path": "tests/fixtures/card-baseline/manifest.json",
+      "sha256": "e01fb21de021046513a1f0e66a1bb10b0829a9420b921699b8a5b90185fdfb3e",
+      "bytes": 7464
+    }
+  }
+}

@@ -1,0 +1,134 @@
+{% include 'base_frontmatter.j2' with context %}
+# 案例：{{ title }}
+
+{% if limited_stub %}
+> **范围限制：** 本页是受限的 case stub（{{ limited_reason }}）。它不代表完整案例卡，
+> 需补充证据并经人工审核后才能升级。
+{% endif %}
+
+- **卡片层级**：{% if card_level == "mechanism" %}机制级（mechanism）{% else %}项目级（project）{% endif %}
+
+## 背景
+
+{{ context }}
+
+## 行动
+
+{% if action %}
+{{ action }}
+{% else %}
+- （来源中未记录具体行动）
+{% endif %}
+
+## 结果（来源断言，未独立核实）
+
+> 来源断言不等于独立验证；以下结果性陈述均来自来源，不代表已核实事实。
+> 证据等级以来源地图为准，均未经独立核实。
+
+{% if result_summary %}
+{{ result_summary }}
+{% endif %}
+{% if result_figures %}
+{% for f in result_figures %}
+- {{ f.statement }}（{{ f.evidence_refs }}）
+{% endfor %}
+{% else %}
+- （没有通过证据编译并归因的结果陈述；来源数字未获逐字原文支撑时不予保留）
+{% endif %}
+
+## 来源提出的可复用机制
+
+{% if reusable_mechanism %}
+{{ reusable_mechanism }}
+（{{ reusable_mechanism_refs }}；来源断言，未独立核实）
+{% else %}
+- （来源中未明确可复用机制；不为填空编造）
+{% endif %}
+
+## 机制推断（标注为推断，非已验证结论）
+
+> 以下内容是对机制为何有效/无效的推断，不构成因果性成功结论。
+
+{% if mechanism_inference %}
+{{ mechanism_inference }}
+（{{ mechanism_inference_refs }}）
+{% else %}
+- （无已绑定的机制推断记录）
+{% endif %}
+
+## 适用条件
+
+{% if applicability_conditions %}
+{% for c in applicability_conditions %}
+- {{ c.statement }}（{{ c.evidence_refs }}{% if c.inference %}；推断，非来源原话{% endif %}）
+{% endfor %}
+{% else %}
+- （未记录已绑定的适用条件）
+{% endif %}
+
+{% if applicability_uncertainties %}
+**待研究问题（模型整理，非来源事实）：**
+{% for u in applicability_uncertainties %}
+- {{ u }}
+{% endfor %}
+{% else %}
+- （未记录待研究问题）
+{% endif %}
+
+## 来源地图
+
+{% for entry in provenance_map %}
+### {{ entry.rel }}
+
+- **Provenance**：{{ entry.provenance }}
+{% if entry.get('source_kind') %}
+- **来源类别（上游登记）**：{{ entry.source_kind }}
+{% endif %}
+{% for limit in entry.limitations %}
+- **限制**：{{ limit }}
+{% endfor %}
+{% endfor %}
+
+{% if shared_provenance %}
+## 共享来源提示
+
+{% for flag in shared_provenance %}
+- {{ flag }}
+{% endfor %}
+{% endif %}
+
+## 判断与证据（逐字原文依据）
+
+> 片段匹配不等于事实已核实；判断置信度为模型判断，需人工审核。
+> 事实（fact）是陈述类别，不表示已获外部验证。
+
+{{ claims_section }}
+
+## 双链索引
+
+{% if related %}
+{% for rel in related %}
+- [[{{ rel }}]]
+{% endfor %}
+{% else %}
+- （无已确认存在的关联对象）
+{% endif %}
+
+{% if pending_links %}
+## 待创建链接（裸文本路径，尚未成为双链）
+
+{% for path in pending_links %}
+- `{{ path }}`
+{% endfor %}
+{% endif %}
+
+## 生成质量标注
+
+{% if generation_issues %}
+{% for issue in generation_issues %}
+- {{ issue }}
+{% endfor %}
+{% else %}
+- 本页生成过程中未记录问题。
+{% endif %}
+- coverage 表示本次输入的读取覆盖情况，与案例证据是否充分相互独立。

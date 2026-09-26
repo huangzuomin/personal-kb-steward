@@ -1,4 +1,5 @@
 """Issue #27: real renderer/executor, synthetic content, mocked model only."""
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -82,14 +83,20 @@ def test_missing_fact_context_and_wrong_types_fail_loudly():
 
 def test_render_failure_is_not_relabelled_as_model_fallback():
     execute = load_executor(ROOT, 'topic-research-compile')
-    payload = {'source_summary': '原始摘要', 'key_facts': ['事实一'], 'topics': [], 'quality_flags': []}
+    body = '示例正文内容足够长，用于验证渲染失败不被降级为模型回退，并保持快照校验路径完整。'
+    payload = json.dumps({'summary': '片段摘要。',
+                          'key_statements': [{'text': '事实一', 'quote': '示例正文内容足够长',
+                                              'kind': 'assertion'}],
+                          'topics': [], 'limitations': [], 'quality_flags': []})
+    note = {'rel': 'raw/example.md', 'title': '示例', 'body': body,
+            'source_text': body, 'source_sha256': hashlib.sha256(body.encode('utf-8')).hexdigest()}
     # Patch the loaded executor globals: these are the functions it actually calls.
     with patch.dict(execute.__globals__, {
-        'call_chat_completion': lambda *args: json.dumps(payload),
+        'call_chat_completion': lambda *args: payload,
         'render': lambda *args: (_ for _ in ()).throw(UndefinedError('broken template')),
     }):
         with pytest.raises(UndefinedError):
-            execute({'notes': [{'rel': 'raw/example.md', 'title': '示例', 'body': '有效资料。'}], 'config': {}})
+            execute({'notes': [note], 'config': {}})
 
 
 def test_missing_import_is_retained_without_failing_readonly_import():

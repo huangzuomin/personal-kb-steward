@@ -1,4 +1,5 @@
 """Issue #16: real seed plan/review/apply and configured auxiliary output regressions."""
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,13 +42,16 @@ def grouping(inputs, **kwargs):
 
 def execute_seed(notes, cluster):
     with patch('core.clustering.cluster_inputs', return_value=([cluster], [])):
-        return execute_skill(ROOT, 'mindseed-grow', {'notes': notes, 'config': {}, 'use_llm': False})
+        return execute_skill(ROOT, 'mindseed-grow',
+                             {'notes': notes, 'config': {'seed_generation': {'mode': 'topic'}},
+                              'use_llm': False})
 
 
 def plan_for(case, rels, rid):
     index = build_index(case.cfg)
     with patch('core.clustering.cluster_inputs', side_effect=grouping):
-        result = steward.mvp_executor_plan(index, case.cfg, '整理知识库', 'mindseed-grow',
+        result = steward.mvp_executor_plan(index, {**case.cfg, 'seed_generation': {'mode': 'topic'}},
+                                          '整理知识库', 'mindseed-grow',
                                           [index.by_rel[p] for p in rels], {}, rid, use_llm=False)
     return {'run_id': rid, 'entry': 'init_kb', 'primary_skill': 'mindseed-grow', 'task': '整理知识库',
             'planned_pages': result['planned_pages'], 'manual_review': [
@@ -55,14 +59,29 @@ def plan_for(case, rels, rid):
 
 
 def reviewed_apply(case, plan):
-    path = case.persist(plan)
-    steward.write_manual_review_queue(case.cfg, plan)
+    existing = [p for p in (case.root / '.openclaw/plans').glob('*.json')
+                if json.loads(p.read_text(encoding='utf-8')).get('run_id') == plan['run_id']]
+    if existing:
+        assert len(existing) == 1
+        path = existing[0]
+    else:
+        path = case.persist(plan)
+        steward.write_manual_review_queue(case.cfg, plan)
     items = [x for x in steward.load_queue(steward.review_queue_path(case.cfg)) if x['run_id'] == plan['run_id']]
     assert items
     for item in items:
         assert steward.command_review(case.cfg, SimpleNamespace(review_command='approve', id=item['id'], reason='test review')) == 0
     assert steward.command_review(case.cfg, SimpleNamespace(review_command='apply-approved')) == 0
-    manifest = case.root / '.openclaw/runs' / (plan['run_id'] + '.json')
+    plan_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    linked = []
+    for candidate in steward.runs_dir(case.cfg).glob(f"{plan['run_id']}*.json"):
+        data = json.loads(candidate.read_text(encoding='utf-8'))
+        if (data.get('parent_run_id') == plan['run_id']
+                and data.get('parent_plan_path') == str(path)
+                and data.get('parent_plan_sha256') == plan_hash):
+            linked.append(candidate)
+    assert len(linked) == 1
+    manifest = linked[0]
     assert json.loads(manifest.read_text(encoding='utf-8'))['status'] == 'applied'
     return path, manifest
 
@@ -111,7 +130,9 @@ def test_substantive_single_source_and_unresolved_links_have_independent_review_
 def test_no_llm_seed_mode_never_calls_provider():
     notes = [{'rel': 'quicknote/a.md', 'title': '服务观察', 'body': '实际咨询需要由编辑提供事实依据和具体的办理程序。'}]
     with patch('core.llm.call_chat_completion', side_effect=AssertionError('no network')) as provider:
-        result = execute_skill(ROOT, 'mindseed-grow', {'notes': notes, 'config': {}, 'use_llm': False})
+        result = execute_skill(ROOT, 'mindseed-grow',
+                               {'notes': notes, 'config': {'seed_generation': {'mode': 'topic'}},
+                                'use_llm': False})
     assert result['pages']
     provider.assert_not_called()
 
@@ -153,11 +174,13 @@ def test_cross_batch_seed_updates_keep_identity_body_and_audit_then_noop(case, c
     assert len(list((case.root / '_kb-steward/seeds').glob('*.md'))) == 2  # seed + managed README
     assert '我的手写判断' in target.read_text(encoding='utf-8')
     before = manifest.read_bytes()
-    with pytest.raises(RunRecordConflict):
+    with pytest.raises((RunRecordConflict, ObjectIdentityError)) as replay:
         steward.command_apply_plan(case.cfg, str(path), allow_reviewed=True)
+    if isinstance(replay.value, ObjectIdentityError):
+        assert 'Identity/revision conflict' in str(replay.value)
     assert manifest.read_bytes() == before
     with pytest.raises((SystemExit, ValueError)):
-        steward.command_rollback(case.cfg, 'seed-second')
+        steward.command_rollback(case.cfg, manifest.stem)
     assert target.exists() and manifest.read_bytes() == before
     assert plan_for(case, ['quicknote/b.md'], 'seed-third')['planned_pages'] == []
     derived_index.rebuild(case.cfg)
@@ -197,7 +220,7 @@ def test_similar_titles_are_review_suggestions_not_auto_merges(case, capsys):
         clusters[0]['title'] = '地方媒体服务转型实践'
         return clusters, issues
     with patch('core.clustering.cluster_inputs', side_effect=different):
-        result = steward.mvp_executor_plan(index, case.cfg, '整理知识库', 'mindseed-grow',
+        result = steward.mvp_executor_plan(index, {**case.cfg, 'seed_generation': {'mode': 'topic'}}, '整理知识库', 'mindseed-grow',
                                           [index.by_rel['quicknote/a.md']], {}, 'similar', use_llm=False)
     p, = result['planned_pages']
     assert p['operation'] == 'create' and p['review_required']

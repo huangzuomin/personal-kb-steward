@@ -1,0 +1,120 @@
+{% include 'base_frontmatter.j2' with context %}
+# 概念：{{ concept_name }}
+
+{% if limited_stub %}
+> **范围限制：** 本页是受限的 concept stub（{{ limited_reason }}）。它不代表完整概念页，
+> 需补充证据并经人工审核后才能升级。
+{% endif %}
+
+{% if definition_inference %}
+## 建议性定义（模型推断）
+
+> 以下定义是模型抽象（推断判断），不是来源原文陈述；是否成立待人工审核。
+
+{{ definition }}
+{% else %}
+## 概念定义
+
+{{ definition }}
+{% endif %}
+
+## 概念解释（模型整理，非来源原文）
+
+{% if explanation %}
+{{ explanation }}
+{% else %}
+- （暂无解释内容）
+{% endif %}
+
+## 别名
+
+{% if aliases %}
+{% for alias in aliases %}
+- {{ alias }}
+{% endfor %}
+{% else %}
+- （未记录别名）
+{% endif %}
+
+## 来源中的边界
+
+{% if source_defined_boundary %}
+{% for b in source_defined_boundary %}
+- {{ b.statement }}（{{ b.evidence_refs }}）
+{% endfor %}
+{% else %}
+- （来源中没有可引用的边界陈述）
+{% endif %}
+
+## 建议性解读（标注为推断，非来源原话）
+
+> 以下内容是模型基于来源语境的推断，不是来源的原文陈述，不构成事实。
+
+{% if suggested_interpretation %}
+{% for item in suggested_interpretation %}
+- {{ item.text }}（推断；{{ item.evidence_refs }}）
+{% if item.supporting_context %}
+  - 支撑语境：{{ item.supporting_context }}
+{% endif %}
+{% endfor %}
+{% else %}
+- （未记录推断性解读）
+{% endif %}
+
+## 来源地图
+
+{% for entry in provenance_map %}
+### {{ entry.rel }}
+
+- **Provenance**：{{ entry.provenance }}
+{% if entry.get('source_kind') %}
+- **来源类别（上游登记）**：{{ entry.source_kind }}
+{% endif %}
+{% for limit in entry.limitations %}
+- **限制**：{{ limit }}
+{% endfor %}
+{% endfor %}
+
+{% if shared_provenance %}
+## 共享来源提示
+
+{% for flag in shared_provenance %}
+- {{ flag }}
+{% endfor %}
+{% endif %}
+
+## 判断与证据（逐字原文依据）
+
+> 片段匹配不等于事实已核实；判断置信度为模型判断，需人工审核。
+> 事实（fact）是陈述类别，不表示已获外部验证。
+
+{{ claims_section }}
+
+## 双链索引
+
+{% if related %}
+{% for rel in related %}
+- [[{{ rel }}]]
+{% endfor %}
+{% else %}
+- （无已确认存在的关联对象）
+{% endif %}
+
+{% if pending_links %}
+## 待创建链接（裸文本路径，尚未成为双链）
+
+{% for path in pending_links %}
+- `{{ path }}`
+{% endfor %}
+{% endif %}
+
+## 生成质量标注
+
+{% if generation_issues %}
+{% for issue in generation_issues %}
+- {{ issue }}
+{% endfor %}
+{% else %}
+- 本页生成过程中未记录问题。
+{% endif %}
+- coverage 表示本次输入的读取覆盖情况，与概念内容是否充分相互独立。

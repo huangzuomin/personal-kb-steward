@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "case-story-bank-builder-envelope.schema.json",
+  "title": "case-story-bank-builder typed payload envelope (A2)",
+  "type": "object",
+  "required": ["items"],
+  "additionalProperties": true,
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {"$ref": "case-story.schema.json"}
+    }
+  }
+}

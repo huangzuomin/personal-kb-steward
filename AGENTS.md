@@ -19,8 +19,8 @@ C:\path\to\your\workspace\wiki
 你不负责采集入口，不负责写正式文章，不负责把知识库全自动重构。你负责：
 
 - 让碎片变成可追溯的 seed card。
-- 让原始长文（如研报、长案例）自动分流，并提炼为 source note 和 topic stub。
-- 让资料沉淀成 source note、literature note、concept page、topic page。
+- 让原始长文（如研报、长案例）先沉淀为带原始快照、证据和 topic hints 的 source note。
+- 让已保存且合格的来源经过独立类型化编排，按证据契约生成 concept page、case story 或满足条件的 topic page。
 - 让项目记录变成 work memory、decision record、timeline。
 - 让写作前准备变成 evidence pack、material pack、gap report、claim check。
 - 让知识库长期健康，不腐烂、不断链、不混乱。
@@ -65,20 +65,14 @@ manual_review
 `status` 只表示知识生命周期。具体流程态必须写入 `stage`，例如：
 
 ```text
-candidate
-promising
-collecting
-assembling
-draft
-checking
-weak
-unsupported
-insufficient
-open
-active
-waiting
-blocked
+source-note: compiling | needs_context
+seed-card: candidate | needs_context
+concept-page: draft | needs_context
+case-story: draft | needs_context
+topic-page: assembling | insufficient
 ```
+
+上表是当前 typed producer 的 canonical 配对：正常候选使用 `status: growing`（seed-card 除外为 `status: seed`），来源不足或需要人工确认使用 `status: manual_review`。`compiled`、`linked` 以及历史页中的其他 stage 只作兼容/历史状态，不能当作本轮自动成功，也不能自由拼接 status 和 stage。
 
 常用类型：
 
@@ -171,14 +165,14 @@ Reconcile 新提案中的判断必须带具体来源和逐字原文片段，由�
 3. 根据请求先路由到产品入口，再由入口选择内部 skill。
 4. 默认生成 dry-run plan，不直接写入知识库。
 5. 高风险、不确定、断链、来源不足事项进入人工确认队列。
-6. 只有用户显式使用 `--apply` 时，才写入派生页面、日志、报告、processed index 和运行状态。
+6. 先保存 plan 和 review queue；无人工审核项可按计划应用，有审核项必须 `review approve` 后使用 `review apply-approved`。`--apply` 不绕过审核，也不把模型预览直接写入知识库。
 
 ## MVP 运行边界
 
 - `raw-ingest-router` 自动接管 `raw/` 目录的新增长文并由 LLM 分流（种子、工作记忆、调研报告、不明）。
 - `mindseed-grow` 处理 `quicknote/`、`inbox/` 以及 router 分发的短文碎片。
 - `work-memory-weave` 处理 `quicknote/`、`inbox/` 以及 router 分发的工作记录。
-- `topic-research-compile` 处理 router 分发的行业报告和长文，提炼出 `source-note` 和带有提纲的 `topic-page` 雏形。
+- `topic-research-compile` 处理 router 分发的行业报告和长文，先提炼带证据的 `source-note` 与 topic hints；保存后的来源再由类型化编排按显式问题和来源门槛生成 concept、case 或 topic 候选。
 - `kb-lint-healthcheck` 只读，输出健康评分和 P0/P1/P2/P3 风险分级，不自动合并、删除、重命名或改结论。
 
 ## 本地执行入口
@@ -186,16 +180,20 @@ Reconcile 新提案中的判断必须带具体来源和逐字原文片段，由�
 ```powershell
 python scripts\personal_kb_steward.py status
 python scripts\personal_kb_steward.py lint
-python scripts\personal_kb_steward.py run
-python scripts\personal_kb_steward.py run --apply
 python scripts\personal_kb_steward.py plan "发现选题"
 python scripts\personal_kb_steward.py task "整理知识库"
-python scripts\personal_kb_steward.py task --apply "整理知识库"
 python scripts\personal_kb_steward.py task "发现选题"
-python scripts\personal_kb_steward.py task "围绕 AI 新闻业 生成材料包"
-python scripts\personal_kb_steward.py review
+python scripts\personal_kb_steward.py init-kb
+python scripts\personal_kb_steward.py finalize-kb
+python scripts\personal_kb_steward.py apply-plan <plan-ref>
+python scripts\personal_kb_steward.py review list
+python scripts\personal_kb_steward.py review show <ID>
+python scripts\personal_kb_steward.py review approve <ID> --reason "确认无误"
+python scripts\personal_kb_steward.py review apply-approved --run-id <run-id>
 python scripts\personal_kb_steward.py processed
 ```
+
+公开合成基线和离线/mock 评估边界见 `docs/public-baseline-evaluation.md`；具体工程验收状态以 `docs/iteration-evidence/LEDGER.md` 为准，通过这些检查也不等于语义 live review。
 
 默认用中文输出。
 

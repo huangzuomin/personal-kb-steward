@@ -15,9 +15,9 @@
 
 Personal KB Steward 致力于解决个人知识库常见的“只存不看”、“越攒越乱”的问题。它通过定义明确的工作流，在本地运行：
 
-1. **🌱 碎片生长 (`mindseed-grow`)**：自动发现孤立的、短小的 `quicknote` 或 `inbox` 笔记，通过大语言模型 (LLM) 进行语义聚类，将它们合并为具备上下文的“种子卡片”。
+1. **🌱 碎片生长 (`mindseed-grow`)**：自动发现孤立的、短小的 `quicknote` 或 `inbox` 笔记，默认按 atomic 模式把一个可独立复述的念头连同归因、证据信号和生长方向沉淀为 seed card；显式 topic 模式仅保留旧聚类兼容。
 2. **🧠 工作记忆沉淀 (`work-memory-weave`)**：从你的每日会议、流水账中自动提取出可复用的“原则”、“教训”或“长期事实”。
-3. **🎯 选题与素材提炼 (`topic-insight-miner` / `writing-evidence-harvester` / `writing-material-pack`)**：根据你指定的选题，自动遍历知识库寻找支撑证据、数据、案例，甚至自动帮你指出“知识缺口”与“反方观点缺失”。
+3. **🎯 选题与素材提炼 (`topic-insight-miner` / `writing-evidence-harvester` / `writing-material-pack`)**：根据你指定的选题，在已确认的来源和证据上查找支撑数据、案例与知识缺口；候选仍经过 plan/review，不把模型提示直接当成专题结论。
 4. **📦 机关材料交接 (`official-material-handoff`)**：把 evidence-pack 与 material-pack 打包为 `official-material-workflow` 可消费的交接包，供下游进行文种判断、成稿和审稿。
 5. **🏥 知识库健康诊断 (`kb-lint-healthcheck`)**：自动扫描坏链、孤儿页面、缺乏双链的目录，并评估风险等级。
 
@@ -25,7 +25,7 @@ Personal KB Steward 致力于解决个人知识库常见的“只存不看”、
 
 你的知识库非常重要，我们绝不擅自修改：
 
-- **Dry-Run 优先**：所有的命令默认只生成 `plan`，绝对不会写入知识库。
+- **Dry-Run 优先**：命令先生成并保存 `plan`；需要写入时仍须经过 review 审核和 `apply-plan`/`review apply-approved`，模型预览不会直接落盘。
 - **严格隔离**：智能体的产出永远存放在特定的派生目录（如 `wiki/seeds/`, `wiki/topics/`），绝对不会修改或删除你的 `raw/` 原始资料。
 - **Manual Review 队列**：当遇到不确定的内容（如证据不足、高风险修改、内容模糊）时，智能体会将其放入 `review queue`，等待你的人工批准 (Approve) 才会执行。
 
@@ -93,7 +93,7 @@ python scripts\validate_config.py
 - `python scripts\personal_kb_steward.py task "沉淀工作记忆"`
 - `python scripts\personal_kb_steward.py task "检查知识库健康"`
 
-*(提示：加上 `--apply` 才会真正写入知识库，否则只生成 plan 供预览。)*
+*(提示：命令会先保存 plan 供审阅；有审核项时执行 `review approve`，再用 `review apply-approved --run-id <run-id>` 写入。`--apply` 不绕过审核。)*
 
 ### 4. 管理人工审核队列
 
@@ -210,9 +210,11 @@ python scripts/kb_index.py stale
 计划带选材依据与过时提示，待复查材料仍须审核，输入变化会阻断旧提案落盘。
 用法与覆盖边界见 [Retrieval 接入](docs/retrieval-integration.md)。
 
-## LLM 选题卡落盘链路
+## 来源编译与类型化选题链路
 
-对 `发现选题` 使用 `--llm` 时，校验通过的 `topic-insight-miner` LLM items 会直接转换为 `planned_pages`，不再只是 `llm_runtime` 预览。目标目录始终取 `config.write.topics_dir`，模型返回的 path/filename 不参与写入路径决策；LLM 选题页 v1 一律进入人工审核。模型失败或落盘校验失败时不会静默回退写入硬编码模板页。
+`topic-research-compile` 先把原始长文编译为带原始 hash、证据、覆盖状态和 `topic_hints` 的 `source-note`；hint 只是待研究提案，不会直接变成 topic page。已保存且合格的 source-note 再由 `init-kb` 的累计阶段或 `finalize-kb` 运行独立的 concept、case、topic 类型化发现：完整 topic 需要明确配置的问题、足够的不同且可用来源和可编译判断，单篇摘要或相似标题不满足条件。
+
+所有候选都先进入 plan/review queue；批准后才由 `apply-plan` 或 `review apply-approved` 写入。模型返回的路径不参与写入路径决策，失败、部分完成和零结果保留真实状态。离线公开基线和 mock 运行器见 [公开基线评估](docs/public-baseline-evaluation.md)；具体工程验收状态以 [迭代证据台账](docs/iteration-evidence/LEDGER.md) 为准，语义 live review 仍需单独完成。
 
 其他 LLM Skills 暂时仍保持预览语义，等待各自的受控落盘契约。
 
@@ -259,9 +261,7 @@ python scripts/synthesize.py "大黄鱼 渠道机会" --topic "大黄鱼产业"
 兼容模式只影响已有笔记的短链接 lint 与附件查询；生成页仍要求完整规范路径，不放宽来源、审核与写入边界。
 附件只索引本库路径，不读取正文、不跟随链接，也不把运行时/排除目录里的文件当证据。
 
-未配置候选规则时，初始化不生成跨来源专题；配置规则后，只统计真正命中判别词的来源，
-达到数量门槛才生成待审核候选。finalize 的主题标题来自已有 source note 的专题标签，
-仅汇总同主题来源；材料、概念、案例仍需显式配置。此版本的自动 topic 聚合仍仅取首个高频标签。
+默认 typed `card_pipeline` 未配置 `topic_questions` 时，初始化不生成完整跨来源专题；只有显式问题、足够的不同且可用来源和证据判断满足时，`finalize-kb` 才提出 topic 候选。source-note 的 topic hint 只用于提案，不能把单一来源或首个高频标签自动升级为完整 topic；concept、case、材料包仍按各自类型契约运行。
 候选与聚合的 plan/Markdown 审核标记一致。finalize 不覆盖非自身生成或正文被人工修改的聚合页，
 此时使用 Reconcile 的受控更新；原始资料不迁移、不改状态。
 
@@ -270,9 +270,8 @@ python scripts/synthesize.py "大黄鱼 渠道机会" --topic "大黄鱼产业"
 
 ## Seed 质量与索引/日志目录（Issue #16）
 
-`mindseed-grow` 不再把日记头部硬截断当成关键信号：摘取正文原句并带来源，
-空内容/单来源与聚类置信度分开处理，seed 候选继续由人审核。主题词不再冒充待建链接。
-唯一同名 seed 生成保留原文的更新提案，已消化来源版本不重复建卡；近似标题只提示复核，不自动合并。
+`mindseed-grow` 默认按 atomic 模式摘取正文原句并带来源，保留一个独立念头、归因、证据信号和可生长方向；空内容、来源状态和模型推测分开处理，seed 候选继续由人审核。显式 topic 模式只保留旧聚类兼容，主题词不冒充待建链接。
+atomic 模式依据来源对象、内容版本和稳定身份生成更新提案，不因标题相同自动认领或合并；已消化的来源版本不重复建卡。显式 topic 模式只保留旧聚类兼容，近似标题仍提示人工复核。
 
 索引与日志可配置为 `write.index_file`、`write.index_title`、`write.logs_dir`、`write.log_file`；
 未配置仍用原有位置。设置 `_kb-steward/...` 后，重建 SQLite，不会在根目录新建默认索引与日志。

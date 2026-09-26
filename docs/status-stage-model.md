@@ -1,5 +1,18 @@
 # Status And Stage Model
 
+## Demo baseline 新产物合同
+
+2026-09-21 迭代中新生成的 source/seed 使用类型配对约束：
+
+| type | 正常候选 | 上下文不足或需审核 |
+| --- | --- | --- |
+| seed-card | status=seed, stage=candidate | status=manual_review, stage=needs_context |
+| source-note | status=growing, stage=compiling | status=manual_review, stage=needs_context |
+
+这些配对由 `core/schemas/` 的类型 schema 校验。旧 producer 的 growing/seed 与 compiled/compiled 只在新产物适配边界归一化，不构成存量迁移。本轮不执行下文历史迁移建议。
+
+schema 合法、引用匹配或 coverage=full 均不表示事实已获独立核实。其他类型仍沿用其现有合同，新增类型后单独补充。
+
 Phase 3 将状态模型拆成两个字段：
 
 - `status`：知识对象生命周期。

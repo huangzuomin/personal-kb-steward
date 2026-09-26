@@ -62,7 +62,8 @@ _CLUSTER_SYSTEM_PROMPT = """\
 """
 
 
-def _llm_cluster(inputs: list[ClusterInput], cfg: dict, max_clusters: int) -> list[dict] | None:
+def _llm_cluster(inputs: list[ClusterInput], cfg: dict, max_clusters: int,
+                 call_counter: list[int] | None = None) -> list[dict] | None:
     """调用 LLM 进行语义聚类，失败返回 None。"""
     try:
         import json
@@ -81,6 +82,8 @@ def _llm_cluster(inputs: list[ClusterInput], cfg: dict, max_clusters: int) -> li
         "notes": docs,
     }
     try:
+        if call_counter is not None:
+            call_counter[0] += 1
         raw = call_chat_completion(cfg, _CLUSTER_SYSTEM_PROMPT, payload)
         data = extract_json(raw)
     except SensitiveContentError:
@@ -169,6 +172,8 @@ def cluster_inputs(
     inputs: list[ClusterInput],
     max_clusters: int = 5,
     cfg: dict | None = None,
+    *,
+    call_counter: list[int] | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     语义聚类入口。
@@ -179,7 +184,7 @@ def cluster_inputs(
         return [], []
 
     if cfg:
-        llm_result = _llm_cluster(inputs, cfg, max_clusters)
+        llm_result = _llm_cluster(inputs, cfg, max_clusters, call_counter)
         if llm_result is not None:
             unmatched = [c["sources"][0] for c in llm_result if c.get("confidence") == "low"]
             return llm_result, unmatched

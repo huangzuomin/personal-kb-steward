@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .output_paths import is_auxiliary_note
+from .content_identity import content_identity_sha256
 from .layout import INTERNAL_DIRS, excluded_note, knowledge_prefixes, scan_dirs
 from .config import kb_root
 from .knowledge_objects import ObjectRegistry, identity_from_metadata, is_knowledge_path
@@ -26,6 +27,9 @@ class Note:
     mtime: float
     size: int
     knowledge_prefixes: tuple[str, ...] = field(default=("wiki/",), repr=False)
+    # GP002: 内容身份（utf-8-sig + CRLF/CR→LF 后的 sha256）。byte 完整性仍以
+    # sha256（原始字节）为准——两者语义不得混用。
+    content_identity_sha256: str = ""
 
     @property
     def is_knowledge(self) -> bool:
@@ -127,6 +131,7 @@ def read_note(path: Path, root: Path, *, prefixes: tuple[str, ...] = ("wiki/",))
         body=body,
         metadata=meta,
         sha256=hashlib.sha256(raw).hexdigest(),
+        content_identity_sha256=content_identity_sha256(raw),
         mtime=stat.st_mtime,
         size=stat.st_size,
         knowledge_prefixes=prefixes,

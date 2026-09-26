@@ -20,25 +20,43 @@ MVP_EXECUTOR_SKILLS = {
     "writing-material-pack",
     "raw-ingest-router",
     "topic-research-compile",
+    "case-story-bank-builder",
 }
+# Typed producers run through their specialized executor/generator exactly
+# once; the generic skill runtime must NOT also fire for them.
+TYPED_PIPELINE_SKILLS = {"mindseed-grow", "topic-research-compile", "case-story-bank-builder"}
 try:
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 except AttributeError:
     pass
 from core.content_safety import assert_safe_content
+from core.reconcile import ReconcileConflict, _text as snapshot_text
+from core.apply_preflight import ParentWriteProber, assert_resolved_target_allowed
 from core.review_runs import apply_review_runs, review_blockers, print_review_blockers, load_checked_queue
+from core.apply_execution import apply_subset_with_writer, queue_snapshot_hash, record_apply_completion, selected_plan_pages, subset_context_fields
 from core.run_records import assert_run_can_start, save_run_manifest, record_failed_attempt, write_observed_page
 from uuid import uuid4
 from core.plan_objects import bind_plan_objects, validate_object_writes, object_manifest_fields, reconcile_created_pages
 from core.skill_runtime import run_skill_runtime
-from core.llm_plan import integrate_topic_llm_writeback
+from core.llm_plan import integrate_topic_llm_writeback, integrate_entry_llm_writeback
 from core.log_manager import write_run_log
 from core.index_builder import update_index
 from core.finalizer import make_finalize_plan
 from core.seed_updates import prepare_seed_updates
 from core.output_paths import ensure_output_dirs
 from core.initializer import make_initialization_plan as build_initialization_plan, split_existing_pages
+from core.executor_adapters import (executor_notes, print_plan_summary,
+                                    make_seed_receipt_draft,
+                                    prepare_seed_receipt_outcomes,
+                                    prepare_typed_executor_pages,
+                                    work_memory_llm_candidates)
+from core.pipeline_history import (
+    complete_generation_receipt_draft,
+    finalize_generation_receipts,
+    make_generation_receipt_draft,
+    receipt_ids,
+)
 from core.skill_executor import execute_skill
 from core.safety import (
     append_operation_log,
@@ -59,6 +77,7 @@ from core.config import (
     resolve_path,
     review_queue_path,
     runs_dir,
+    seed_generation_mode,
     sha256_file,
     sha256_text,
     state_path,
@@ -82,16 +101,18 @@ from core.state import (
     update_processed_index as update_processed_index_core,
 )
 from core.review_queue import (
-    load_queue,
-    save_queue,
-    append_item,
+    load_queue, save_queue, append_item,
     find_item,
     filter_items,
     pending_items,
     approved_items,
     approve_item,
     reject_item,
+    reject_item_typed,
+    apply_source_auto_apply_policy,
+    configure_reject_parser,
     batch_approve,
+    append_plan_review_queue,
     format_list_item,
     format_show_item,
     format_queue_summary,
@@ -148,8 +169,6 @@ def is_noncanonical_strict(target: str, resolved: str) -> bool:
     if "/" not in clean and not clean.lower().endswith(".md"):
         return False
     return clean != resolved
-
-
 def normalize_source(value: Any) -> list[str]:
     if not value:
         return []
@@ -196,17 +215,6 @@ def query_results(index: VaultIndex, query: str, limit: int = 12, prefixes: tupl
             "summary": note_summary(note, 180),
         }
         for note in select_notes(index, query, limit=limit, prefixes=prefixes, cfg=cfg)
-    ]
-def executor_notes(notes: list[Note]) -> list[dict[str, Any]]:
-    return [
-        {
-            "rel": note.rel,
-            "title": note.title,
-            "body": note.body,
-            "summary": note_summary(note, 180),
-            "metadata": note.metadata,
-        }
-        for note in notes
     ]
 def apply_executor_pages(index: VaultIndex, cfg: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     created = []
@@ -302,22 +310,46 @@ def mvp_executor_plan(
     *,
     use_llm: bool = False,
     retriever: Retriever | None = None,
+    providers: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if skill not in MVP_EXECUTOR_SKILLS:
         return None
     selection = None
+    receipt_draft = None
     retriever = retriever or Retriever(cfg, index)
+    if skill == "case-story-bank-builder":
+        # Typed case discovery over persisted-source eligibility; the executor
+        # delegates to the shared card_pipeline and returns planned_pages.
+        context = {"config": cfg, "vault_index": index, "use_llm": use_llm,
+                   "run_id": plan_run_id, "providers": providers}
+        result = execute_skill(ROOT, skill, context)
+        return {
+            "skill": skill,
+            "inputs": result.get("inputs", []),
+            "processed": result.get("processed", 0),
+            "issues": result.get("issues", []),
+            "planned_pages": result.get("planned_pages", []),
+            "stages": result.get("stages", {}),
+            "input_outcomes": result.get("input_outcomes", []),
+            "retrieval": None,
+        }
     if skill == "mindseed-grow":
         candidates_all = [
             n for n in changed
             if n.rel.startswith(("quicknote/", "inbox/")) or (n.rel.startswith("raw/") and raw_seed_allowed(n, cfg))
         ]
-        notes = unprocessed_notes(processed_index, candidates_all, skill)[: cfg["scan"]["max_files_per_run"]]
-        context = {"config": cfg, "notes": executor_notes(notes), "use_llm": use_llm}
+        notes = candidates_all[: cfg["scan"]["max_files_per_run"]]
+        context = {"config": cfg, "notes": executor_notes(notes), "use_llm": use_llm,
+                   "vault_index": index, "retriever": retriever}
     elif skill == "topic-research-compile":
+        # The initializer has already classified current source versions.  Do
+        # not reapply the processed-index shortcut here: a changed config,
+        # prompt, or unverifiable applied target must be allowed to reach the
+        # producer again, while pending/unchanged inputs never enter ``changed``.
         candidates_all = [n for n in changed if n.rel.startswith("raw/")]
-        notes = unprocessed_notes(processed_index, candidates_all, skill)[: cfg["scan"]["max_files_per_run"]]
-        context = {"config": cfg, "notes": executor_notes(notes), "use_llm": use_llm}
+        notes = candidates_all[: cfg["scan"]["max_files_per_run"]]
+        context = {"config": cfg, "notes": executor_notes(notes), "use_llm": use_llm,
+                   "vault_index": index, "retriever": retriever}
     elif skill == "topic-insight-miner":
         selection = retriever.select(task, limit=8, prefixes=knowledge_prefixes_with_inputs(cfg))
         notes = selection.notes
@@ -338,23 +370,41 @@ def mvp_executor_plan(
         context["retrieval"] = selection.report
         for note in context["notes"]:
             note["retrieval"] = retriever.hits[note["rel"]]
+    if skill == "topic-research-compile" and notes:
+        receipt_draft = make_generation_receipt_draft(
+            index, cfg, skill=skill, stage="source_compile", notes=notes,
+            use_llm=use_llm)
+    elif skill == "mindseed-grow" and notes:
+        receipt_draft = make_seed_receipt_draft(index, cfg, notes, use_llm)
     result = execute_skill(ROOT, skill, context)
     pages = planned_pages_from_executor_result(cfg, result, plan_run_id)
     if skill == "mindseed-grow":
-        pages, seed_issues = prepare_seed_updates(index, cfg, pages)
+        pages, seed_issues, updater_outcomes = prepare_seed_updates(
+            index, cfg, pages, return_outcomes=True)
         result["issues"].extend(seed_issues)
+        result = prepare_seed_receipt_outcomes(result, updater_outcomes)
     if selection:
         annotate_pages(pages, selection)
     elif skill == "topic-research-compile":
         for page in pages:
             page["retrieval_source_hashes"] = {n.rel: n.sha256 for n in notes if n.rel in page.get("sources", [])}
+        pages = prepare_typed_executor_pages(index, cfg, pages, result)
+    if receipt_draft is not None:
+        result["generation_receipts"] = [
+            complete_generation_receipt_draft(receipt_draft, result)
+        ]
     return {
         "skill": skill,
         "inputs": result.get("inputs", []),
         "processed": result.get("processed", 0),
         "issues": result.get("issues", []),
         "planned_pages": pages,
+        "input_outcomes": result.get("input_outcomes", []),
+        "provider_calls": result.get("provider_calls", 0),
+        "generator_result": result.get("generator_result", {}),
+        "typed_update_outcomes": result.get("typed_update_outcomes", []),
         "retrieval": selection.report if selection else None,
+        "generation_receipts": result.get("generation_receipts", []),
     }
 def select_llm_input_notes(
     index: VaultIndex,
@@ -372,8 +422,7 @@ def select_llm_input_notes(
         ]
         return unprocessed_notes(processed_index, candidates, skill)[:5]
     if skill == "work-memory-weave":
-        candidates = [n for n in changed if n.rel.startswith(("quicknote/", "inbox/")) and work_memory_candidate(n)]
-        return unprocessed_notes(processed_index, candidates, skill)[:5]
+        return unprocessed_notes(processed_index, work_memory_llm_candidates(cfg, changed), skill)[:5]
     retriever = retriever or Retriever(cfg, index)
     if skill == "topic-insight-miner":
         return retriever.select(task, limit=8, prefixes=knowledge_prefixes_with_inputs(cfg)).notes
@@ -431,10 +480,6 @@ def raw_seed_allowed(note: Note, cfg: dict[str, Any]) -> bool:
     max_chars = int(cfg["scan"].get("raw_seed_max_chars", 2000))
     text = note.title + "\n" + note.body[: max_chars + 200]
     return len(note.body) <= max_chars or any(marker in text for marker in markers)
-def work_memory_candidate(note: Note) -> bool:
-    text = note.title + "\n" + note.body[:1500]
-    patterns = ["会议", "周报", "项目", "复盘", "决定", "决策", "待办", "行动项", "课程", "上课", "开会", "产品优化"]
-    return any(p in text for p in patterns)
 def raw_coverage_report(index: VaultIndex, cfg: dict[str, Any]) -> dict[str, Any]:
     raw_files = sorted(note.rel for note in index.notes if note.rel.startswith("raw/"))
     coverage: dict[str, list[str]] = {rel: [] for rel in raw_files}
@@ -604,8 +649,6 @@ def extract_dates(text: str) -> list[str]:
         except ValueError:
             continue
     return sorted(dates)
-
-
 def evidence_items(notes: list[Note], query: str) -> list[dict[str, str]]:
     query_terms = retrieval_terms(query)
     items = []
@@ -646,8 +689,17 @@ def plan_filename(plan: dict[str, Any]) -> str:
     safe_entry = slug(str(plan.get("entry") or "task"), "entry")
     return f"{plan['run_id']}-{safe_entry}.json"
 def write_execution_plan(cfg: dict[str, Any], plan: dict[str, Any]) -> Path:
+    if any(item.get("type") == "planned_pages_require_review"
+           for item in plan.get("manual_review", []) if isinstance(item, dict)):
+        plan.setdefault("review_contract", "page-scoped-v1")
     assert_safe_content(plan)
-    bind_plan_objects(build_index(cfg), plan)
+    bound_index = build_index(cfg)
+    bind_plan_objects(bound_index, plan)
+    # Receipt drafts were fingerprinted before the producer call.  Only now,
+    # after stable object identities/revisions are bound, is the target catalog
+    # complete enough to persist in the same plan JSON write.
+    finalize_generation_receipts(plan, index=bound_index)
+    assert_safe_content(plan)
     target_dir = plan_dir(cfg)
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / plan_filename(plan)
@@ -661,22 +713,10 @@ def write_execution_plan(cfg: dict[str, Any], plan: dict[str, Any]) -> Path:
         "next_step": "请审阅 plan；确认无误后再运行 apply-plan。",
     })
     return path
-
-
 def write_manual_review_queue(cfg: dict[str, Any], plan: dict[str, Any]) -> int:
-    items = plan.get("manual_review", [])
-    if not items:
-        return 0
-    target = review_queue_path(cfg)
-    for item in items:
-        record = {
-            "run_id": plan.get("run_id"),
-            "entry": plan.get("entry"),
-            "task": plan.get("task"),
-            **item,
-        }
-        append_item(target, record)
-    return len(items)
+    queued = append_plan_review_queue(review_queue_path(cfg), plan)
+    apply_source_auto_apply_policy(cfg, plan)  # GP002 Auto-Apply v0.1（可开关，默认关）
+    return queued
 
 
 def make_execution_plan(
@@ -706,7 +746,7 @@ def make_execution_plan(
         if n.rel.startswith(("quicknote/", "inbox/")) or (n.rel.startswith("raw/") and raw_seed_allowed(n, cfg))
     ]
     mindseed_unprocessed = unprocessed_notes(processed_index, mindseed_inputs, "mindseed-grow")
-    work_memory_inputs = [n for n in input_scope if n.rel.startswith(("quicknote/", "inbox/")) and work_memory_candidate(n)]
+    work_memory_inputs = work_memory_llm_candidates(cfg, input_scope)
     work_memory_unprocessed = unprocessed_notes(processed_index, work_memory_inputs, "work-memory-weave")
     raw_inputs = [n for n in input_scope if n.rel.startswith("raw/")]
     raw_unprocessed = unprocessed_notes(processed_index, raw_inputs, "raw-ingest-router")
@@ -828,12 +868,20 @@ def make_execution_plan(
     ) if not scheduled else None
     if plan_executor_result:
         planned_pages = plan_executor_result.get("planned_pages", [])
+        # Typed stage outcomes (provider calls, zero/blocked/error reasons) must
+        # stay observable even when a stage produced no pages.
+        for stage in (plan_executor_result.get("stages") or {}).values():
+            actions.append({"operation": "pipeline_stage", "entry": entry,
+                            "stage": stage.get("stage", "typed_stage"),
+                            "skill": primary_skill, "risk": "medium",
+                            "reason": "类型化生成阶段结果（含真实调用次数与受限原因）。",
+                            **stage})
         for action in actions:
             if action.get("operation") == "run_primary_skill" and action.get("skill") == primary_skill:
                 action["execution_mode"] = "plan_preview"
                 action["planned_pages"] = len(planned_pages)
                 action["planned_inputs"] = len(plan_executor_result.get("inputs", []))
-        if plan_executor_result.get("issues") and not (use_llm and primary_skill == "topic-insight-miner"):
+        if plan_executor_result.get("issues") and not (use_llm and primary_skill in ("topic-insight-miner", "work-memory-weave", "writing-material-pack")):
             manual_review.append({
                 "type": "planned_executor_issues",
                 "risk": "medium",
@@ -854,7 +902,7 @@ def make_execution_plan(
             use_llm=use_llm and not mock_llm,
         )
         raw_pages = raw_compile_result.get("planned_pages", []) if raw_compile_result else []
-        if raw_pages:
+        if raw_compile_result and raw_compile_result.get("inputs"):
             planned_pages.extend(raw_pages)
             actions.append({
                 "operation": "run_follow_up_skill",
@@ -868,6 +916,7 @@ def make_execution_plan(
                 "estimated_inputs": len(raw_unprocessed),
                 "planned_inputs": len(raw_compile_result.get("inputs", [])),
                 "planned_pages": len(raw_pages),
+                "input_outcomes": raw_compile_result.get("input_outcomes", []),
             })
         elif raw_blocked:
             manual_review.append({
@@ -886,9 +935,18 @@ def make_execution_plan(
     # Keep the producing skill's quality decision. A source-note is not
     # automatically high-confidence merely because its destination is sources/.
     llm_result: dict[str, Any] | None = None
-    if use_llm and not scheduled:
+    # Typed producers fire exactly ONE producer authority. Source/case typed
+    # skills always suppress the generic runtime; for mindseed the suppression
+    # applies only in the default atomic mode — an explicit
+    # seed_generation.mode=topic configuration retains the legacy behavior
+    # where the generic runtime also runs.
+    suppress_runtime = (
+        primary_skill in ("topic-research-compile", "case-story-bank-builder")
+        or (primary_skill == "mindseed-grow"
+            and seed_generation_mode(cfg) == "atomic"))
+    if use_llm and not scheduled and not suppress_runtime:
         input_notes = select_llm_input_notes(index, cfg, task, primary_skill, input_scope, processed_index, retriever)
-        llm_retrieval_report = retriever.history[-1] if primary_skill == "topic-insight-miner" and retriever.history else None
+        llm_retrieval_report = retriever.history[-1] if primary_skill in ("topic-insight-miner", "writing-material-pack") and retriever.history else None
         document_builder = retriever.documents if retriever.history else llm_documents
         docs = document_builder(input_notes, int(cfg["scan"].get("max_source_chars", 6000)),
                                 int(cfg["scan"].get("max_total_source_chars", 0)))
@@ -899,10 +957,13 @@ def make_execution_plan(
                                "llm_items": len(llm_result.get("items", [])), "llm_ok": llm_result.get("ok"),
                                "planned_inputs": len(input_notes)})
 
-        if primary_skill == "topic-insight-miner":
-            planned_pages, writeback_issue = integrate_topic_llm_writeback(
-                cfg, planned_pages, llm_result, input_notes, llm_retrieval_report, plan_run_id,
-                lambda content, sources: validate_markdown(index, content, sources))
+        validate_md = lambda content, sources: validate_markdown(index, content, sources)
+        if primary_skill in ("topic-insight-miner", "work-memory-weave", "writing-material-pack"):
+            def writeback(pages):
+                if primary_skill == "topic-insight-miner":
+                    return integrate_topic_llm_writeback(cfg, pages, llm_result, input_notes, llm_retrieval_report, plan_run_id, validate_md)
+                return integrate_entry_llm_writeback(cfg, pages, llm_result, input_notes, plan_run_id, validate_md, skill=primary_skill, retrieval_report=llm_retrieval_report)
+            planned_pages, writeback_issue = writeback(planned_pages)
             if writeback_issue:
                 manual_review.append({"type": "llm_writeback_blocked", "risk": "medium",
                                       "reason": "LLM 返回已收到，但未通过受控落盘契约；没有回退写入模板页。",
@@ -956,71 +1017,6 @@ def make_execution_plan(
         "manual_review": manual_review,
         "apply_instruction": "请审阅 plan；无人工审核项时运行 apply-plan，有人工审核项时先 review approve 再运行 review apply-approved。",
     }
-
-
-def print_plan_summary(plan: dict[str, Any], path: Path, queued: int) -> None:
-    print(f"计划文件：{path}")
-    print(f"入口：{plan.get('entry')}")
-    print(f"Primary skill：{plan.get('primary_skill')}")
-    for retrieval in plan.get("retrieval", []):
-        print(f"检索：{retrieval['engine']}，选中 {len(retrieval['hits'])} 页")
-        if retrieval.get("fallback_reason"):
-            print(retrieval["fallback_reason"])
-        if retrieval.get("requires_review"):
-            print("检索材料包含需复查的依据，详见计划 retrieval 字段。")
-    print(f"扫描范围：{plan.get('scan_scope', 'changed')}")
-    print(f"变更文件估计：{plan.get('changed_files')}")
-    if plan.get("scan_scope") == "all":
-        print(f"候选文件总数：{plan.get('candidate_files')}")
-    batching = plan.get("batching") or {}
-    if batching:
-        print(
-            "初始化批次："
-            + f"raw {batching.get('raw_batches', 0)} 批，"
-            + f"quicknote/inbox {batching.get('quicknote_batches', 0)} 批，"
-            + f"本批后剩余 {batching.get('remaining_after_current', 0)} 个输入\n"
-        )
-    print(f"计划动作：{len(plan.get('actions', []))}")
-    estimated = sum(int(action.get("estimated_inputs", 0)) for action in plan.get("actions", []))
-    if estimated:
-        print(f"预计处理输入：{estimated}")
-    print(f"人工确认项：{len(plan.get('manual_review', []))}")
-    quality = plan.get("plan_quality") or {}
-    if quality.get("duplicate_targets"):
-        print(f"重复目标路径：{len(quality.get('duplicate_targets', {}))}")
-    blocked = quality.get("blocked_placeholder_pages") or []
-    if blocked:
-        print(f"mock/占位页面：{len(blocked)}")
-    raw_cov = quality.get("raw_coverage") or {}
-    if raw_cov.get("raw_total"):
-        print(f"raw 覆盖：{raw_cov.get('covered', 0)}/{raw_cov.get('raw_total', 0)}")
-    if quality.get("pdf_needs_extraction"):
-        print(f"PDF 待抽取：{len(quality.get('pdf_needs_extraction', []))}")
-    llm = plan.get("llm_runtime")
-    if llm:
-        mode = "mock" if llm.get("mock") else "provider"
-        print(f"LLM runtime：{mode}，items={len(llm.get('items', []))}，ok={llm.get('ok')}")
-    planned = plan.get("planned_pages", [])
-    if planned:
-        print(f"计划落盘页面：{len(planned)}")
-        print(f"应用命令：python scripts\\personal_kb_steward.py apply-plan {path}")
-        # -- Plan Diff 预览 --
-        for pp in planned[:5]:
-            print()
-            print("─" * 60)
-            print(f"  skill: {pp.get('skill', '')}")
-            print(f"  路径: {pp.get('target', '')}")
-            content = pp.get('content', '')
-            preview_lines = content.split('\n')[:20]
-            print("  前 20 行:")
-            for pline in preview_lines:
-                print(f"    {pline}")
-            print("─" * 60)
-        if len(planned) > 5:
-            print(f"  ... 还有 {len(planned) - 5} 个页面未展示")
-    if queued:
-        print(f"已写入人工确认队列：{queued}")
-    print(f"当前为 dry-run；{plan.get('apply_instruction')}")
 
 
 def write_report(index: VaultIndex, cfg: dict[str, Any], operations: list[dict[str, Any]], lint: dict[str, Any] | None, label: str) -> str:
@@ -1165,7 +1161,7 @@ def command_init_kb(
         queue = load_checked_queue(review_queue_path(cfg))
         if review_blockers(queue, plan["run_id"]):
             print("init-kb --apply 暂停：计划已保存，并未丢弃；本 run 的全部阻塞项需人工复核。")
-            print_review_blockers(queue, plan["run_id"])
+            print_review_blockers(queue, plan["run_id"], page_contract=False)
             print(f"查看：review list --run-id {plan['run_id']} --all")
             if plan.get("planned_pages"):
                 print(f"逐项 review show/approve 后：review apply-approved --run-id {plan['run_id']}")
@@ -1186,8 +1182,10 @@ def command_init_kb(
     return 0
 
 
-def command_finalize_kb(cfg: dict[str, Any], *, apply: bool = False) -> int:
-    plan = make_finalize_plan(cfg, plan_run_id=run_id(), stamp=stamp())
+def command_finalize_kb(cfg: dict[str, Any], *, apply: bool = False,
+                        no_llm: bool = False) -> int:
+    plan = make_finalize_plan(cfg, plan_run_id=run_id(), stamp=stamp(),
+                              use_llm=not no_llm)
     path = write_execution_plan(cfg, plan)
     queued = write_manual_review_queue(cfg, plan)
     print_plan_summary(plan, path, queued)
@@ -1266,6 +1264,7 @@ def preflight_apply_pages(
     allow_reviewed: bool = False,
 ) -> list[tuple[dict[str, Any], Path]]:
     assert_safe_content(pages)
+    prober = ParentWriteProber(str(cfg.get("_attempt_id") or run_id()))
     targets: list[tuple[dict[str, Any], Path]] = []
     duplicates = duplicate_page_targets(pages)
     if duplicates:
@@ -1285,6 +1284,7 @@ def preflight_apply_pages(
             target.relative_to(root)
         except ValueError:
             raise SystemExit(f"拒绝越界写入：{target}")
+        assert_resolved_target_allowed(cfg, root, target)
         operation = str(page.get("operation") or "create")
         if operation == "update" and not target.exists():
             raise SystemExit(f"更新目标不存在，拒绝 apply-plan：{rel_path}")
@@ -1298,24 +1298,17 @@ def preflight_apply_pages(
             raise SystemExit(f"plan 内容 hash 不匹配：{rel_path}")
         parent = target.parent
         if parent.exists():
-            probe = parent / f".write-check-{run_id()}.tmp"
-            try:
-                probe.write_text("ok", encoding="utf-8")
-            except OSError as exc:
-                raise PermissionError(f"目标目录不可写：{parent}") from exc
-            finally:
-                try:
-                    if probe.exists():
-                        probe.unlink()
-                except OSError:
-                    pass
+            prober.probe_parent(parent)
+        if operation == "update":
+            prober.check_existing_target(target)
         targets.append((page, target))
     return targets
 def write_run_manifest(cfg: dict[str, Any], manifest: dict[str, Any]) -> Path:
     return save_run_manifest(cfg, manifest)
-
-def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = False, expected_run_id: str | None = None) -> int:
+def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = False, expected_run_id: str | None = None, subset_context: dict[str, Any] | None = None) -> int:
     cfg = {**cfg, "_attempt_id": str(uuid4()), "_write_started": False}
+    if subset_context is not None:
+        cfg["_subset_context"] = subset_context
     created: list[dict[str, Any]] = []
     plan_path: Path | None = None
     root: Path | None = None
@@ -1330,13 +1323,15 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
         pages = plan.get("planned_pages", [])
         if not pages:
             raise SystemExit("该 plan 没有 planned_pages，不能 apply-plan。请先重新生成 dry-run plan。")
+        if subset_context is not None:
+            pages = selected_plan_pages(plan, subset_context)
         ensure_dirs(cfg)
         root = kb_root(cfg)
-        apply_run_id = str(plan.get("run_id") or run_id())
+        apply_run_id = str(subset_context.get("execution_run_id") if subset_context is not None else plan.get("run_id") or run_id())
         cfg["_run_id"] = apply_run_id
         assert_run_can_start(cfg, apply_run_id)
         skipped_existing: list[str] = []
-        if plan.get("entry") == "init_kb":
+        if plan.get("entry") == "init_kb" and subset_context is None:
             pages, skipped_existing = split_existing_pages(cfg, pages)
         if not pages and skipped_existing:
             print(f"apply-plan：{len(skipped_existing)} 个目标已存在，初始化计划无需重复写入。")
@@ -1349,6 +1344,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
             "planned_pages": len(pages),
             "skipped_existing_pages": skipped_existing,
             "backup_dir": str(backup_root(cfg) / apply_run_id),
+            **(subset_context_fields(subset_context, ("parent_run_id", "parent_plan_path", "parent_plan_sha256", "subset_hash", "selected_targets")) if subset_context is not None else {}),
         })
         cfg["_phase"] = "preflight"
         targets = preflight_apply_pages(cfg, root, pages, allow_reviewed=allow_reviewed)
@@ -1359,6 +1355,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
             "targets": [str(target) for _, target in targets],
             "skipped_existing_pages": skipped_existing,
         })
+        if subset_context is not None and (sha256_file(plan_path) != subset_context["parent_plan_sha256"] or queue_snapshot_hash([i for i in load_checked_queue(review_queue_path(cfg)) if i.get("run_id") == subset_context["parent_run_id"]]) != subset_context["queue_snapshot_sha256"]): raise SystemExit("subset apply authority changed before first write")
         cfg["_phase"] = "writing_pages"
         for page, target in targets:
             cfg["_write_started"] = True
@@ -1399,7 +1396,8 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
         report_operations = [{**op, "issues": [*op.get("issues", []), *notices]} for op in operations]
         write_run_log(index, cfg, report_operations, plan.get("task", "apply-plan"))
         cfg["_phase"] = "update_processed_index"
-        update_processed_index(index, cfg, operations)
+        completion_operations = record_apply_completion(
+            cfg, plan, plan_path, created, index, operations, subset_context, writer=update_processed_index)
         cfg["_phase"] = "save_state"
         save_state(cfg, build_index(cfg), operations)
         cfg["_phase"] = "update_index"
@@ -1416,7 +1414,15 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
             "recovery_hint": recovery_hint(cfg, apply_run_id),
             "reconcile": reconcile,
             "status": "applied",
+            "processed_index_advanced": subset_context is None or bool(completion_operations),
+            # The plan remains the receipt store.  The manifest carries the
+            # exact saved-plan hash and receipt references so a later selector
+            # can prove that this run applied this reviewed plan.
+            "plan_sha256": sha256_file(plan_path),
+            "generation_receipt_ids": receipt_ids(plan),
         }
+        if subset_context is not None:
+            manifest.update(subset_context_fields(subset_context, ("parent_run_id", "parent_plan_path", "parent_plan_sha256", "subset_hash", "selected_targets", "selected_review_ids", "queue_snapshot_sha256", "rejected_targets")))
         cfg["_phase"] = "finalize_manifest"
         manifest_path = write_run_manifest(cfg, manifest)
         append_operation_log(cfg, {
@@ -1438,7 +1444,7 @@ def command_apply_plan(cfg: dict[str, Any], ref: str, *, allow_reviewed: bool = 
         print(f"回滚命令：python scripts\\personal_kb_steward.py rollback {apply_run_id}")
         return 0
     except (Exception, SystemExit) as exc:
-        failed_run_id = str(expected_run_id or locals().get("apply_run_id") or Path(ref).stem or "apply-plan-error")
+        failed_run_id = str(locals().get("apply_run_id") or expected_run_id or Path(ref).stem or "apply-plan-error")
         fail_apply_plan(cfg, failed_run_id, plan_path, root, created, exc)
         raise
 
@@ -1524,6 +1530,7 @@ def command_review(cfg: dict[str, Any], args: Any) -> int:
             target, plan_dir(cfg), run_id=getattr(args, "run_id", None),
             all_runs=getattr(args, "all", False),
             apply_plan=lambda path, rid: command_apply_plan(cfg, str(path), allow_reviewed=True, expected_run_id=rid),
+            apply_subset=lambda path, related: apply_subset_with_writer(cfg, path, related, writer=command_apply_plan),
         )
     items = load_checked_queue(target)
 
@@ -1566,13 +1573,9 @@ def command_review(cfg: dict[str, Any], args: Any) -> int:
         return 1
 
     elif sub == "reject":
-        reason = getattr(args, "reason", "") or ""
-        if reject_item(items, args.id, reason):
-            save_queue(target, items)
-            print(f"已拒绝：{args.id}")
-            return 0
-        print(f"未找到待确认项：{args.id}")
-        return 1
+        rejection_type = getattr(args, "rejection_type", None) or "other"
+        return reject_item_typed(items, args.id, getattr(args, "reason", "") or "",
+                                 rejection_type, target)
 
     elif sub == "batch-approve":
         risk_filter = getattr(args, "risk", None)
@@ -1634,6 +1637,7 @@ def main(argv: list[str]) -> int:
     init_kb.add_argument("--apply", action="store_true", help="按批次生成并应用初始化计划，直到无新增页或达到批次数上限")
     init_kb.add_argument("--max-batches", type=int, default=20, help="--apply 最多连续处理的批次数，默认 20")
     finalize = sub.add_parser("finalize-kb", help="跨 source-note 聚合并补 related 链接")
+    finalize.add_argument("--no-llm", action="store_true", help="不调用 LLM；类型化发现如实记录 blocked/not_configured，不声称生成")
     finalize.add_argument("--apply", action="store_true", help="应用 finalize 计划")
     apply_plan = sub.add_parser("apply-plan")
     apply_plan.add_argument("ref", help="plan 文件路径、run_id 或唯一片段")
@@ -1653,8 +1657,7 @@ def main(argv: list[str]) -> int:
     review_approve.add_argument("id", help="记录 ID 或前缀")
     review_approve.add_argument("--reason", default="", help="批准理由")
     review_reject = review_sub.add_parser("reject", help="拒绝记录")
-    review_reject.add_argument("id", help="记录 ID 或前缀")
-    review_reject.add_argument("--reason", default="", help="拒绝理由")
+    configure_reject_parser(review_reject)
     review_batch = review_sub.add_parser("batch-approve", help="批量批准")
     review_batch.add_argument("--risk", help="只批准指定风险等级")
     review_batch.add_argument("--type", help="只批准指定类型")
@@ -1681,7 +1684,7 @@ def main(argv: list[str]) -> int:
     if args.command == "init-kb":
         return command_init_kb(cfg, batch_size=args.batch_size, no_llm=args.no_llm, apply=args.apply, max_batches=args.max_batches)
     if args.command == "finalize-kb":
-        return command_finalize_kb(cfg, apply=args.apply)
+        return command_finalize_kb(cfg, apply=args.apply, no_llm=args.no_llm)
     if args.command == "apply-plan":
         return command_apply_plan(cfg, args.ref)
     if args.command == "rollback":
@@ -1691,7 +1694,6 @@ def main(argv: list[str]) -> int:
     if args.command == "processed":
         return command_processed(cfg)
     return 2
-
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))

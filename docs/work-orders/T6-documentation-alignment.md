@@ -1,0 +1,14 @@
+# Documentation alignment after typed baseline implementation
+
+NOT DISPATCHED. Bounded documentation-only task. Allowed README.md, AGENTS.md, skills/topic-research-compile/SKILL.md, skills/mindseed-grow/SKILL.md and M3-integration/documentation-alignment.md. Preserve all production/test files and other workers' docs. Public code only; no private/config/env/model/network/commits.
+
+Root found runtime guidance that still describes the previous behavior: source skill directly emits topic/concept/evidence-chain pages; its stage block lists lifecycle statuses; the mindseed metadata example still says stage:seed despite the current atomic contract. Align documentation with actual implementation/schema without inventing capabilities.
+
+- Five public user entries remain unchanged. Default atomic seed is one independent thought with attribution, evidence and growth guidance. Explicit topic mode is legacy compatibility, not the new quality standard. Use valid current seed stage example (candidate or needs_context according status).
+- Actual topic-research-compile single-source executor emits evidence-grounded source notes and topic hints; full concept/case/topic discovery is a distinct cumulative typed orchestration step over eligible saved sources. Full topics require configured explicit question and sufficient evidenced distinct source origins; no auto-upgrading hints or single source to full topic.
+- Supported statuses/stages from actual canonical schemas/status-stage-model.md, no compiled/linked success by default. Full source capture vs partial/zero/failed stay distinct. Quoted statement is not independently verified truth.
+- Existing plan -> review -> apply remains only writer. Preserve stable identity, no legacy-card repair, no automatic original deletion or rerun. Document actual CLI only (inspect parser; don't invent --config or new force commands).
+- Explain new public evaluator by linking docs/public-baseline-evaluation.md; offline/mock infrastructure is accepted, live semantic evaluation and B2/B3 lifecycle completion still pending at this task's snapshot. Do not market pending subset apply as shipped. Keep operational guidance concise; no unnecessary implementation details in normal user entry flow.
+- Remove or clearly separate conflicting legacy examples rather than adding one overriding sentence atop contradictory instructions. Retain useful existing source protection and real-link rules.
+
+Verify UTF-8/no accidental replacement characters, snippets vs current config/schema/parser, links to real files, gitdiff only owned docs. No business tests required for this docs-only task. Deliver compact report of exact stale instructions resolved and any remaining pending docs to finish after B3.

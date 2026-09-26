@@ -8,7 +8,12 @@ from typing import Any, Callable
 
 from .layout import knowledge_dirs
 from .config import kb_root, sha256_text
+from .initialization_policy import (
+    load_initialization_pipeline,
+    validate_initialization_config,
+)
 from .state import changed_notes, load_processed_index, load_state, unprocessed_notes
+from .pipeline_history import select_generation_inputs, selection_stage_summary
 from .vault import Note, build_index
 
 
@@ -182,24 +187,87 @@ def make_initialization_plan(
     batch_size: int = 6,
     use_llm: bool = True,
     include_all: bool = True,
+    discover_providers: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # Validate the fixed workflow declaration before building selections or
+    # invoking any producer.  The declaration is read from workflows.json via
+    # the existing router seam; there is no second hardcoded pipeline source.
+    pipeline = load_initialization_pipeline()
+    seed_config_enabled = validate_initialization_config(cfg)
+    seed_pipeline_enabled = "seed_cluster" in pipeline
+    promote_pipeline_enabled = "promote_candidates" in pipeline
     index = build_index(cfg)
     state = load_state(cfg)
     changed = changed_notes(index, state)
     input_scope = index.notes if include_all else changed
     processed_index = load_processed_index(cfg)
-    raw_candidates = [n for n in input_scope if n.rel.startswith("raw/")]
-    quick_candidates = [n for n in input_scope if n.rel.startswith(("quicknote/", "inbox/"))]
-    raw_unprocessed = unprocessed_notes(processed_index, raw_candidates, "topic-research-compile")
-    quick_unprocessed = unprocessed_notes(processed_index, quick_candidates, "mindseed-grow")
+    # Source intake uses exact saved generation receipts per indexed raw
+    # version.  It must inspect all current raw siblings even when the global
+    # state snapshot says only one file changed; otherwise a pending/failed
+    # sibling can disappear behind a successful sibling.
+    source_selection = select_generation_inputs(
+        index, cfg, "topic-research-compile", include_all=include_all,
+        use_llm=use_llm)
+    seed_selection = (
+        select_generation_inputs(
+            index, cfg, "mindseed-grow", include_all=include_all,
+            use_llm=use_llm)
+        if seed_pipeline_enabled and seed_config_enabled else
+        {"generate": [], "pending": [], "rejected": [], "unchanged": [], "retryable": []}
+    )
+    # `initialize.seed_stage: false` runs the source stage only. Unset (or true)
+    # keeps behaviour byte-identical to before -- same discipline as B09.
+    #
+    # Why this must be a code switch and not a config workaround: narrowing
+    # `scan.include_dirs` to drop quicknote/inbox would rebuild the index without
+    # those notes, and `index.md` is regenerated from that index at apply time.
+    # And the seed stage cannot be skipped at review time either -- mindseed-grow
+    # calls the model while BUILDING the plan, so deferring the decision to
+    # `review reject` still spends every model call.
+    seed_stage_enabled = seed_pipeline_enabled and seed_config_enabled
+    raw_candidates = [n for n in index.notes if n.rel.startswith("raw/")]
+    quick_candidates = [n for n in index.notes if n.rel.startswith(("quicknote/", "inbox/"))]
+    # Give never-attempted inputs the first batch slot.  A malformed or
+    # incomplete historical receipt remains retryable, but must not occupy
+    # every batch ahead of new raw material indefinitely.  Preserve the
+    # existing vault order within each group and keep retryable inputs for
+    # later batches.
+    source_generate_ids = {
+        id(note) for note in source_selection.get("generate", [])
+        if note is not None
+    }
+    source_retry_ids = {
+        id(item.get("note"))
+        for item in source_selection.get("retryable", [])
+        if isinstance(item, dict) and item.get("note") is not None
+    }
+    raw_generate = [note for note in raw_candidates if id(note) in source_generate_ids]
+    raw_retryable = [note for note in raw_candidates if id(note) in source_retry_ids]
+    raw_unprocessed = raw_generate + [
+        note for note in raw_retryable if id(note) not in source_generate_ids
+    ]
+    seed_to_generate = {
+        id(note): note for note in seed_selection.get("generate", [])
+    }
+    seed_to_generate.update({
+        id(item.get("note")): item.get("note")
+        for item in seed_selection.get("retryable", [])
+        if isinstance(item, dict) and item.get("note") is not None
+    })
+    quick_unprocessed = (
+        [note for note in quick_candidates if id(note) in seed_to_generate]
+        if seed_stage_enabled else []
+    )
     raw_batches = batch_notes(raw_unprocessed, batch_size)
     quick_batches = batch_notes(quick_unprocessed, max(batch_size, 10))
     current_raw_batch = raw_batches[0] if raw_batches else []
     current_quick_batch = quick_batches[0] if quick_batches else []
     planned_pages: list[dict[str, Any]] = []
+    generation_receipt_drafts: list[dict[str, Any]] = []
     skipped_existing_pages: list[str] = []
     manual_review: list[dict[str, Any]] = []
     actions: list[dict[str, Any]] = []
+    from .card_pipeline import executor_stage
 
     if current_raw_batch:
         result = executor_plan_fn(
@@ -210,19 +278,22 @@ def make_initialization_plan(
         fresh_raw_pages, skipped = split_existing_pages(cfg, raw_pages)
         planned_pages.extend(fresh_raw_pages)
         skipped_existing_pages.extend(skipped)
-        actions.append({
-            "operation": "pipeline_stage",
-            "entry": "init_kb",
-            "stage": "source_compile",
-            "skill": "topic-research-compile",
-            "risk": "medium",
+        # Truthful stage envelope: outcome comes from the executor's accepted
+        # input_outcomes (ok/zero/partial/blocked/error + complete flags),
+        # never inferred from issue strings.
+        source_stage = executor_stage("init_kb", "source_compile",
+                                      "topic-research-compile", result or {})
+        source_stage.update({
             "reason": "分批把 raw 长文沉淀为 source note，并在 source note 中保留 topic 候选。",
             "execution_mode": "llm" if use_llm else "heuristic",
             "batch": 1,
-            "planned_inputs": len(current_raw_batch),
             "planned_pages": len(fresh_raw_pages),
             "skipped_existing_pages": len(skipped),
+            "typed_update_outcomes": (result or {}).get("typed_update_outcomes", []),
+            "typed_update_issues": (result or {}).get("typed_update_issues", []),
         })
+        generation_receipt_drafts.extend(result.get("generation_receipts", []) if result else [])
+        actions.append(source_stage)
         if result and result.get("issues"):
             manual_review.append({
                 "type": "source_compile_quality_issues",
@@ -230,13 +301,78 @@ def make_initialization_plan(
                 "reason": "source compile 存在 LLM 降级或质量提示，需要抽样检查。",
                 "items": result.get("issues", [])[:20],
             })
+    elif any(source_selection.get(key) for key in ("pending", "rejected", "unchanged")):
+        # Cached source decisions are disclosed as a stage even though no
+        # executor/provider call is made.  Pending/rejected inputs keep their
+        # original plan reference and do not occupy the generated batch.
+        source_stage = executor_stage("init_kb", "source_compile",
+                                      "topic-research-compile", {"inputs": []})
+        source_stage.update(selection_stage_summary(source_selection, use_llm=use_llm))
+        source_stage.update({
+            "operation": "pipeline_stage",
+            "entry": "init_kb",
+            "stage": "source_compile",
+            "skill": "topic-research-compile",
+            "risk": "medium",
+            "batch": 0,
+            "planned_pages": 0,
+            "skipped_existing_pages": 0,
+        })
+        actions.append(source_stage)
+    else:
+        source_stage = executor_stage("init_kb", "source_compile",
+                                      "topic-research-compile", {"inputs": []})
+        source_stage.update({
+            "outcome": "no_inputs",
+            "reason": "no_inputs",
+            "reason_detail": "当前批次没有未处理 raw 输入；未调用 source compiler。",
+            "provider_calls": 0,
+            "execution_mode": "llm" if use_llm else "heuristic",
+            "batch": 0,
+            "planned_inputs": 0,
+            "planned_pages": 0,
+            "skipped_existing_pages": 0,
+        })
+        actions.append(source_stage)
 
-    if current_quick_batch:
+    if not seed_stage_enabled:
+        seed_stage = executor_stage("init_kb", "seed_cluster", "mindseed-grow",
+                                    {"inputs": []})
+        disabled_reasons = []
+        if not seed_pipeline_enabled:
+            disabled_reasons.append("workflows.json 的 init_kb.pipeline 省略 seed_cluster")
+        if not seed_config_enabled:
+            disabled_reasons.append("配置 initialize.seed_stage=false")
+        seed_stage.update({
+            "state": "disabled",
+            # Keep the long-standing no-input outcome enum; the explicit state
+            # and reason carry the disabled decision for audit consumers.
+            "outcome": "no_inputs",
+            "reason": "seed_stage_disabled",
+            "reason_detail": "；".join(disabled_reasons) + "；未调用 seed provider，未消费 quicknote/inbox。",
+            "seed_stage_enabled": False,
+            "seed_stage_disabled": True,
+            "provider_calls": 0,
+            "execution_mode": "llm" if use_llm else "heuristic",
+            "batch": 0,
+            "planned_inputs": 0,
+            "planned_pages": 0,
+            "skipped_existing_pages": 0,
+        })
+        actions.append(seed_stage)
+    elif current_quick_batch:
         result = executor_plan_fn(
             index, cfg, "初始化知识库", "mindseed-grow",
             current_quick_batch, processed_index, plan_run_id, use_llm=use_llm,
         )
-        if result and result.get("issues"):
+        seed_outcomes = (result or {}).get("input_outcomes", [])
+        valid_zero = bool(seed_outcomes) and all(
+            isinstance(item, dict)
+            and item.get("outcome") == "zero"
+            and item.get("complete") is True
+            for item in seed_outcomes
+        )
+        if result and result.get("issues") and not valid_zero:
             manual_review.append({"type": "seed_quality_issues", "risk": "medium",
                                   "reason": "seed 存在主题/重复问题，请核对提案；未改动原始资料。",
                                   "items": result["issues"][:20]})
@@ -244,33 +380,126 @@ def make_initialization_plan(
         fresh_seed_pages, skipped = split_existing_pages(cfg, seed_pages)
         planned_pages.extend(fresh_seed_pages)
         skipped_existing_pages.extend(skipped)
-        actions.append({
+        generation_receipt_drafts.extend(result.get("generation_receipts", []) if result else [])
+        seed_stage = executor_stage("init_kb", "seed_cluster", "mindseed-grow",
+                                    result or {})
+        seed_stage.update({
+            "reason": "把 quicknote/inbox 原子化整理为 seed 候选，作为后续晋级输入。",
+            "batch": 1,
+            "planned_pages": len(fresh_seed_pages),
+            "skipped_existing_pages": len(skipped),
+            "provider_calls": int((result or {}).get("provider_calls", 0) or 0),
+        })
+        actions.append(seed_stage)
+    elif any(seed_selection.get(key) for key in ("pending", "rejected", "unchanged", "retryable")):
+        seed_stage = executor_stage("init_kb", "seed_cluster", "mindseed-grow",
+                                    {"inputs": []})
+        seed_stage.update(selection_stage_summary(
+            seed_selection, use_llm=use_llm, skill="mindseed-grow"))
+        seed_stage.update({
             "operation": "pipeline_stage",
             "entry": "init_kb",
             "stage": "seed_cluster",
             "skill": "mindseed-grow",
-            "risk": "low",
-            "reason": "把 quicknote/inbox 聚类成 seed，作为后续晋级输入。",
-            "batch": 1,
-            "planned_inputs": len(current_quick_batch),
-            "planned_pages": len(fresh_seed_pages),
-            "skipped_existing_pages": len(skipped),
-        })
-
-    promote_pages = promote_candidate_pages(cfg, current_raw_batch, plan_run_id)
-    planned_pages.extend(promote_pages)
-    if promote_pages:
-        actions.append({
-            "operation": "pipeline_stage",
-            "entry": "init_kb",
-            "stage": "promote_candidates",
-            "skill": "kb-initialize",
             "risk": "medium",
-            "reason": "根据当前批次 source 生成 topic/concept/case/material-pack 候选。",
-            "batch": 1,
-            "planned_inputs": len(current_raw_batch),
-            "planned_pages": len(promote_pages),
+            "batch": 0,
+            "planned_pages": 0,
+            "skipped_existing_pages": 0,
         })
+        actions.append(seed_stage)
+    else:
+        seed_stage = executor_stage("init_kb", "seed_cluster", "mindseed-grow",
+                                    {"inputs": []})
+        seed_stage.update({
+            "outcome": "no_inputs",
+            # `reason` must not claim "no inputs" when the stage was switched
+            # off while quicknote/inbox inputs exist -- that would be a false
+            # statement in the artifact. `outcome` keeps its existing value so
+            # no enum consumer changes meaning.
+            "reason": "no_inputs" if seed_stage_enabled else "seed_stage_disabled",
+            "reason_detail": (
+                "当前批次没有未处理 quicknote/inbox 输入；未调用 seed updater。"
+                if seed_stage_enabled else
+                "配置 initialize.seed_stage=false：本轮只沉淀源卡，未调用 seed updater"
+                "（quicknote/inbox 输入仍在，未被消费）。"),
+            "seed_stage_enabled": seed_stage_enabled,
+            "provider_calls": 0,
+            "execution_mode": "llm" if use_llm else "heuristic",
+            "batch": 0,
+            "planned_inputs": 0,
+            "planned_pages": 0,
+            "skipped_existing_pages": 0,
+        })
+        actions.append(seed_stage)
+
+    from .config import card_pipeline_mode
+
+    pipeline_mode = card_pipeline_mode(cfg)
+    if not promote_pipeline_enabled:
+        promote_stage = executor_stage("init_kb", "promote_candidates", "kb-initialize",
+                                       {"inputs": []})
+        promote_stage.update({
+            "state": "disabled",
+            "outcome": "no_inputs",
+            "reason": "promote_stage_disabled",
+            "reason_detail": "workflows.json 的 init_kb.pipeline 省略 promote_candidates；未调用晋级 provider。",
+            "provider_calls": 0,
+            "execution_mode": "llm" if use_llm else "heuristic",
+            "planned_inputs": 0,
+            "planned_pages": 0,
+        })
+        actions.append(promote_stage)
+    elif pipeline_mode == "legacy":
+        # Explicit legacy configuration only: old candidate promotion is
+        # marker-rule based and is NEVER presented as typed baseline output.
+        promote_pages = promote_candidate_pages(cfg, current_raw_batch, plan_run_id)
+        planned_pages.extend(promote_pages)
+        if promote_pages:
+            actions.append({
+                "operation": "pipeline_stage",
+                "entry": "init_kb",
+                "stage": "promote_candidates",
+                "skill": "kb-initialize",
+                "risk": "medium",
+                "reason": "legacy 模式：根据当前批次 source 生成 topic/concept/case/material-pack 候选（非类型化基线卡片）。",
+                "batch": 1,
+                "planned_inputs": len(current_raw_batch),
+                "planned_pages": len(promote_pages),
+            })
+    else:
+        # Typed pipeline (default): downstream discovery reads ONLY previously
+        # persisted eligible source notes (cumulative), never the source pages
+        # this plan merely proposes. Stage outcomes are always disclosed.
+        # GP001: concept/case 的生成对象收窄为本轮批输入对应的已沉淀来源卡
+        # （focus_rels）；跨源积压聚合属 finalize 的语义，不经此入口。
+        from .card_pipeline import discover_cards
+        discovery = discover_cards(index, cfg, run_id=plan_run_id, use_llm=use_llm,
+                                   providers=discover_providers, skill="kb-initialize",
+                                   now=stamp[:10],
+                                   focus_rels=[n.rel for n in current_raw_batch])
+        planned_pages.extend(discovery["planned_pages"])
+        generation_receipt_drafts.extend(
+            discovery.get("generation_receipt_drafts", [])
+            if isinstance(discovery.get("generation_receipt_drafts", []), list) else [])
+        for stage in discovery["stages"].values():
+            action = {
+                "operation": "pipeline_stage",
+                "entry": "init_kb",
+                "stage": stage["stage"],
+                "skill": "kb-initialize",
+                "risk": "medium",
+                **stage,
+            }
+            action["stage_reason"] = stage.get("reason")
+            action["pipeline_reason"] = "类型化管线：从符合条件的已沉淀 source note 生成概念/案例/专题候选。"
+            actions.append(action)
+        if discovery["issues"]:
+            manual_review.append({
+                "type": "typed_discovery_issues",
+                "risk": "medium",
+                "reason": "类型化概念/案例发现存在受限、冲突或需人工确认项；候选页仍需逐页审核。",
+                "items": discovery["issues"][:20],
+            })
 
     root = kb_root(cfg)
     pdf_files = sorted(str(p.relative_to(root)).replace("\\", "/") for p in (root / "raw").glob("*.pdf")) if (root / "raw").exists() else []
@@ -297,8 +526,11 @@ def make_initialization_plan(
         "task": "初始化知识库",
         "entry": "init_kb",
         "primary_skill": "kb-initialize",
-        "pipeline_declared": ["intake", "source_compile", "seed_cluster", "promote_candidates", "quality_gate"],
-        "pipeline_executed_now": [a["stage"] for a in actions],
+        "pipeline_declared": list(pipeline),
+        "pipeline_executed_now": [
+            a["stage"] for a in actions
+            if a.get("state") != "disabled" and a.get("outcome") != "disabled"
+        ],
         "knowledge_base": str(index.root),
         "scan_scope": "all" if include_all else "changed",
         "changed_files": len(changed),
@@ -320,6 +552,7 @@ def make_initialization_plan(
         },
         "actions": actions,
         "planned_pages": planned_pages,
+        "_generation_receipt_drafts": generation_receipt_drafts,
         "plan_quality": {
             "duplicate_targets": duplicate_page_targets(planned_pages),
             "blocked_placeholder_pages": [p.get("rel_path") for p in planned_pages if page_has_blocked_placeholder(p)],

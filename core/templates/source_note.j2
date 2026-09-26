@@ -8,7 +8,11 @@
 {{ summary }}
 
 ## 关键事实
-{% if key_facts %}
+{% if facts_display %}
+{% for fact in facts_display %}
+- {% if fact.speaker %}（{{ fact.speaker }}）{% endif %}{{ fact.text }}
+{% endfor %}
+{% elif key_facts %}
 {% for fact in key_facts %}
 - {{ fact }}
 {% endfor %}
@@ -27,6 +31,15 @@
 
 ## 质量标记
 - 分析模式：{{ analysis_mode }}
+- 覆盖状态：{{ coverage }}
+{% if source_type %}
+- 来源类型：{{ source_type }}{{ '（发言人：' ~ (speakers | join('、')) ~ '）' if speakers else '' }}
+{% endif %}
+{% if limitations %}
+{% for item in limitations %}
+- 局限：{{ item }}
+{% endfor %}
+{% endif %}
 {% if quality_flags %}
 {% for flag in quality_flags %}
 - {{ flag }}

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "source-note.schema.json",
+  "title": "Canonical source-note contract (M0)",
+  "type": "object",
+  "required": [
+    "title", "type", "status", "stage", "sources", "summary",
+    "confidence", "review_required", "schema_version", "analysis_mode",
+    "key_statements", "topic_hints"
+  ],
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "anyOf": [
+        {"properties": {"status": {"const": "growing"}, "stage": {"const": "compiling"}}, "required": ["status", "stage"]},
+        {"properties": {"status": {"const": "manual_review"}, "stage": {"const": "needs_context"}}, "required": ["status", "stage"]}
+      ]
+    }
+  ],
+  "properties": {
+    "title": {"type": "string", "minLength": 1},
+    "type": {"const": "source-note"},
+    "status": {"enum": ["growing", "manual_review"]},
+    "stage": {"enum": ["compiling", "needs_context"]},
+    "sources": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1
+    },
+    "summary": {"type": "string"},
+    "confidence": {"enum": ["high", "medium", "low"]},
+    "review_required": {"type": "boolean"},
+    "schema_version": {"type": "string", "minLength": 1},
+    "generator_version": {"type": ["string", "null"]},
+    "analysis_mode": {"enum": ["llm", "heuristic", "heuristic-fallback", "unknown"]},
+    "source_hashes": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "coverage": {
+      "type": ["string", "null"],
+      "enum": ["full", "partial", "unknown", null]
+    },
+    "related": {"type": "array", "items": {"type": "string"}},
+    "pending_links": {"type": "array", "items": {"type": "string"}},
+    "manual_review": {"type": "array", "items": {"type": "string"}},
+    "key_statements": {"type": "array", "items": {"type": "string"}},
+    "topic_hints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": {"type": "string", "minLength": 1},
+          "content": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "quality_flags": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "string_array": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

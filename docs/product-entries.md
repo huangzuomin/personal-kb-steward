@@ -16,7 +16,7 @@ Phase 1 将用户可见入口从 11 个 Skill 收敛为 5 个高频任务。
 
 现有 `scripts/personal_kb_steward.py task` 仍然是单 Skill 执行模型。自然语言先命中产品入口，再执行该入口的 `primary_skill`。
 
-Phase 2 后，`task` 和 `run` 默认只生成 dry-run plan；只有显式添加 `--apply` 才会写入知识库。
+当前 `task` 和 `run` 先保存 dry-run plan；无人工审核项时用 `apply-plan`，有审核项时先 `review approve`，再用 `review apply-approved --run-id` 写入。`init-kb` 和 `finalize-kb` 的 `--apply` 也遵守这条 review queue 边界，不是绕过审核的唯一写入条件。
 
 ## 边界
 

@@ -245,7 +245,57 @@ def _update_source_note(note: Note, related: list[str], tags: list[str], run_id:
     return {**update_base(note), "skill": "kb-finalize", "operation": "update", "rel_path": note.rel, "target": note.rel, "sources": list(meta.get("sources") or []), "origin": {"source_paths": list(meta.get("sources") or []), "operation": "kb-finalize", "run_id": run_id}, "content_sha256": sha256_text(content), "content": content, "review_required": True, "confidence": "medium"}
 
 
-def make_finalize_plan(cfg: dict[str, Any], *, plan_run_id: str, stamp: str, apply_updates: bool = False) -> dict[str, Any]:
+def make_finalize_plan(cfg: dict[str, Any], *, plan_run_id: str, stamp: str,
+                       apply_updates: bool = False, use_llm: bool = True,
+                       providers: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Typed pipeline (default): delegate concept/case discovery to the shared
+    card_pipeline over eligible persisted sources. Explicit legacy mode
+    ("card_pipeline": {"mode": "legacy"}) retains the historical marker-rule
+    aggregation behavior for compatibility; its output is never presented as
+    typed baseline cards."""
+    from .config import card_pipeline_mode
+
+    if card_pipeline_mode(cfg) != "legacy":
+        return _make_typed_finalize_plan(cfg, plan_run_id=plan_run_id, stamp=stamp,
+                                         use_llm=use_llm, providers=providers)
+    return _make_legacy_finalize_plan(cfg, plan_run_id=plan_run_id, stamp=stamp)
+
+
+def _make_typed_finalize_plan(cfg: dict[str, Any], *, plan_run_id: str, stamp: str,
+                              use_llm: bool, providers: dict[str, Any] | None) -> dict[str, Any]:
+    from .card_pipeline import discover_cards
+    index = build_index(cfg)
+    discovery = discover_cards(index, cfg, run_id=plan_run_id, use_llm=use_llm,
+                               providers=providers, skill="kb-finalize", now=stamp[:10])
+    actions = []
+    for stage in discovery["stages"].values():
+        action = {"operation": "pipeline_stage", "entry": "finalize_kb",
+                  "skill": "kb-finalize", "risk": "medium", **stage}
+        action["stage_reason"] = stage.get("reason")
+        action["pipeline_reason"] = "类型化管线：从符合条件的已沉淀 source note 生成概念/案例/专题候选。"
+        actions.append(action)
+    manual_review = []
+    if discovery["issues"]:
+        manual_review.append({"type": "finalize_typed_issues", "risk": "medium",
+                              "reason": "类型化概念/案例发现存在受限、冲突或需人工确认项。",
+                              "items": discovery["issues"][:20]})
+    if discovery["planned_pages"]:
+        manual_review.append({"type": "finalize_review", "risk": "medium",
+                              "reason": "核对候选概念/案例及其来源快照后再应用。"})
+    return {"run_id": plan_run_id, "created_at": stamp, "mode": "dry-run",
+            "task": "finalize knowledge base", "entry": "finalize_kb",
+            "primary_skill": "kb-finalize", "knowledge_base": str(index.root),
+             "actions": actions, "planned_pages": discovery["planned_pages"],
+             "_generation_receipt_drafts": discovery.get("generation_receipt_drafts", []),
+             "plan_quality": {"typed_stages": discovery["stages"],
+                             "eligible_sources": discovery["eligible_sources"],
+                             "rejected_sources": len(discovery["rejected_sources"])},
+            "manual_review": manual_review,
+            "apply_instruction": "审阅类型化候选后运行 review/apply。"}
+
+
+def _make_legacy_finalize_plan(cfg: dict[str, Any], *, plan_run_id: str,
+                               stamp: str) -> dict[str, Any]:
     index = build_index(cfg)
     dirs = write_dirs(cfg)
     sources_prefix = dirs["sources"]

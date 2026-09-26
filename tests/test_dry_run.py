@@ -50,7 +50,13 @@ class DryRunTests(unittest.TestCase):
         self.run_plan()
 
     def test_mock_llm_plan_is_dry_run(self):
-        self.assertIn("LLM runtime", self.run_plan("--mock-llm").stdout)
+        output = self.run_plan("--mock-llm").stdout
+        # The current mock plan follows the atomic seed-card contract; the
+        # CLI summary does not promise an "LLM runtime" label.
+        self.assertIn("skill: mindseed-grow", output)
+        self.assertIn("type: seed-card", output)
+        self.assertIn("schema_version: m0-1", output)
+        self.assertNotIn("type: topic-card", output)
 
 
 if __name__ == "__main__":

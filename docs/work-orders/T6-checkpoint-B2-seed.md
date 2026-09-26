@@ -1,0 +1,18 @@
+# B2-seed checkpoint — receipt-backed atomic intake
+
+Dispatch only after root accepts B2-source. Owner: topic_integration_finish. Continue current shared checkout; preserve other work. Public/synthetic only; no private vault/config/env/native Claude/network/install/commit, no B3 edits. CLI <=1700 lines; extract a narrowly scoped executor preparation helper if needed rather than exceeding the cap.
+
+Goal: extend the accepted source receipt lifecycle to the actual atomic seed path. Existing accepted atomic generation, attribution, identity and update protections remain authoritative. Seed updater is still the single seed update authority; do not route seeds through typed_card_updates.
+
+Allowed: core/pipeline_history.py, initializer.py, executor_adapters.py, seed_updates.py only for exposing exact updater dispositions/snapshots without changing accepted merge policy; scripts/personal_kb_steward.py thin integration; focused new tests/test_seed_receipt_acceptance.py and tests/test_pipeline_history.py; M3-integration/checkpoint-B2-seed.md/json. If actual atomic result lacks an essential evaluated-input fact, make the smallest envelope-only addition in skills/mindseed-grow/executor.py/core/atomic_seed.py, explicitly report it; do not rewrite prompts or semantics.
+
+Required:
+
+1. Select current quicknote/inbox input versions from the full indexed scope rather than global changed_notes or processed-index presence. Pending/rejected/applied/valid-zero do not occupy generated batch slots. Failed/deferred siblings remain eligible. Preserve explicit legacy topic-mode compatibility without presenting it as accepted atomic output.
+2. Record current semantic mode/config/model and actual executor/atomic/updater/prompt/schema/template dependency bytes, plus exact original and actual bounded retrieval snapshots before a provider call. Source-specific generator inventory must not be reused as the seed inventory. Input order/run IDs/time/credentials cannot destabilize fingerprints.
+3. Feed complete per-input outcomes and exact required target sets through normal plan binding/save. An evaluated but uncited original may belong to a completed evaluation closure; do not confuse lack of citation with failure. Conversely an unread/clipped/failed input is not complete. A multi-thought input remains tied to ALL its required cards.
+4. Pending -> old plan ref, no call/proposal. Applied/current target verified -> no call/no write/unchanged ID/revision/bytes. Rejected -> no auto resubmission. Explicit fully-read valid zero -> no call and no fake card. Failed/malformed/blocked -> visible incomplete, normal retryable generation. Model/config/implementation drift invalidates reuse.
+5. Preserve verified NOOP snapshots at updater decision; do not bind newer unverified bytes during save. Retain the B2-source race regression. New or changed input must reach the actual seed updater even if processed-index previously marked it processed. Never title-adopt legacy seed cards.
+6. One focused >batch-size test must show pending items do not starve later unseen items. A mixed success/failure test must show successful input is not regenerated on normal include_all=False continuation. Tests use real atomic provider seam/generation/save/review/apply; mock only provider output, not ready-made pages. Original fixture bytes remain unchanged.
+
+Deliver a runnable seed checkpoint with concise test commands/results and remaining derived work, then STOP. Root independently reviews before dispatching cumulative concept/case/topic receipt and generation-cohort exclusion. This checkpoint is engineering-only; no live semantic claim.

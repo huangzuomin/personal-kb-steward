@@ -90,7 +90,7 @@ class WorkflowDeclarationTests(unittest.TestCase):
             (kb / "inbox").mkdir()
             (kb / "raw").mkdir()
             (kb / "raw" / "温州人工智能观察.md").write_text(
-                "# 温州人工智能观察\n\n这是一篇长文材料，需要先沉淀为 source note 和 topic stub，而不是直接变成 seed。",
+                "# 温州人工智能观察。\n\n这是一篇长文材料，需要先沉淀为 source note 和 topic stub，而不是直接变成 seed。",
                 encoding="utf-8",
             )
             cfg = self.make_cfg(kb)
@@ -106,16 +106,12 @@ class WorkflowDeclarationTests(unittest.TestCase):
             review_types = {item.get("type") for item in plan["manual_review"]}
 
             self.assertEqual(follow_up_actions[0]["skill"], "topic-research-compile")
-            self.assertGreaterEqual(follow_up_actions[0]["planned_pages"], 1)
-            self.assertGreaterEqual(len(plan["planned_pages"]), 1)
-            self.assertTrue(any(page["rel_path"].startswith("wiki/sources/source-") for page in plan["planned_pages"]))
-            self.assertFalse(any("Mock summary for dry-run" in page["content"] for page in plan["planned_pages"]))
-            # Heuristic extraction is still routed, but is not certified ready.
-            self.assertIn("planned_pages_require_review", review_types)
+            self.assertEqual(follow_up_actions[0]["planned_pages"], 0)
+            # B12: heuristic analysis remains routed and traceable, but never
+            # enters the writable page/review set and blocks healthy siblings.
             source_pages = [p for p in plan["planned_pages"] if p.get("skill") == "topic-research-compile"]
-            self.assertTrue(all(p["review_required"] and p["confidence"] == "low" for p in source_pages))
-            self.assertTrue(all(p["analysis_mode"] == "heuristic" for p in source_pages))
-            self.assertTrue(all(steward.page_has_blocked_placeholder(p, cfg) for p in source_pages))
+            self.assertEqual(source_pages, [])
+            self.assertIn("non_llm_source", str(plan))
             self.assertNotIn("raw_input_blocked", review_types)
 
     def test_organize_kb_blocks_raw_full_initialization(self):
@@ -152,6 +148,10 @@ class WorkflowDeclarationTests(unittest.TestCase):
             (kb / "quicknote" / "idea.md").write_text("# AI课程\n\nAI课程选题 #seed", encoding="utf-8")
             (kb / "raw" / "report.pdf").write_bytes(b"%PDF-1.4")
             cfg = self.make_cfg(kb)
+            # Explicit legacy opt-in: this test asserts the OLD marker-rule
+            # candidate promotion; the default typed pipeline is covered by
+            # tests/test_card_pipeline_integration.py.
+            cfg["card_pipeline"] = {"mode": "legacy"}
             # Candidate promotion is config-driven. This vault declares one rule
             # whose marker matches the fixture, so exactly one page is expected.
             cfg["candidate_promotion"] = [{
@@ -256,6 +256,9 @@ class WorkflowDeclarationTests(unittest.TestCase):
                     encoding="utf-8",
                 )
             cfg = self.make_cfg(kb)
+            # Explicit legacy opt-in: this test asserts the old marker-rule
+            # aggregation behavior.
+            cfg["card_pipeline"] = {"mode": "legacy"}
             # Aggregation titles are derived from the material (the topic page
             # takes its name from 「提取的专题」) or declared here. Without an
             # entry a page is simply not produced, so the fixture declares the
@@ -332,6 +335,8 @@ class WorkflowDeclarationTests(unittest.TestCase):
                     encoding="utf-8",
                 )
             cfg = self.make_cfg(kb)
+            # Explicit legacy opt-in (old aggregation assertions).
+            cfg["card_pipeline"] = {"mode": "legacy"}
 
             plan = make_finalize_plan(cfg, plan_run_id="finalize-no-config", stamp=steward.stamp())
 

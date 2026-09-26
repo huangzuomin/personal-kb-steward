@@ -1,0 +1,14 @@
+# T8 final acceptance corrections
+
+NOT DISPATCHED until current helper worker handoff. Same worker, ownership only core/typed_card_updates.py, helper tests and T8 reports. Preserve others. Public synthetic only; no pipeline/CLI/source-generator changes, live calls/private vault/commits/subagents.
+
+Root reran six original probes using current ACTUAL generator helpers (class renamed T8Base->ConceptCaseBase). All now correct; see astra-T8-probes-root-after.json. Four remaining criteria from original review still fail, reproduced in astra-T8-extra-before.json and .execution/astra-T8-extra-probes.py. Preserve BEFORE; write new after output.
+
+1. Validate persisted card_state VERSION EXACT int==1 and type equal outer card type before any semantic use, both candidate and existing. Current bool version True is accepted. Stored update version also cannot accept bool. Source kind must be from actual sa.STATEMENT_KINDS, not arbitrary nonempty string. Expected malformed state becomes per-page blocked, valid sibling survives.
+2. Candidate concept/case/topic claims are never actually revalidated against captured originals. Root changes compiled evidence quote to nonexistent text, preserving source SHA, and helper happily creates it. Reuse core.claims.validate_claims with captured docs (path/content/sha256); enforce exact locators/quote/hash/claim ID and required nonempty claims. This was required by prior workorder. Source already uses its separate exact-unit verifier. Do not fabricate or repair malformed evidence silently. Validate relevant stored semantic kind/role against stored card_state before reuse, not merely statement membership.
+3. Preserve proposal envelope via dict(page, ...) with owned fields overridden. _proposal_common currently rebuilds a small whitelist, drops unknown/future integration metadata (root_probe_annotation in root probe) despite prior instruction. Known supplied item/origin/analysis_mode/confidence must remain consistent and meaningful, no None override of existing page values. Keep review_required=True; target aliases/base fields correct. This is necessary for B2 per-input ledger propagation, not arbitrary schema expansion.
+4. A successful NOOP currently appends a quality issue; root noop_issues shows it. Keep noop in outcomes but issues only for blocked/error (plus actual non-noop warnings if relevant). Noop must not trigger false review failure.
+
+Also ensure added-source outside-manual-text and multiline custom YAML tests cover actual preservation. Do not replace valid manual content just to pass parser assertions. Source update test should prove downstream collect_eligible_sources accepts new outer/inner hashes after binding/apply-like persistence.
+
+Run actual helper/object-plan plus claims tests, root probe AFTER, update report with remaining limits. STOP for root review; B1 stays blocked until accepted.

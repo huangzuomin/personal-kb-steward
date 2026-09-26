@@ -12,9 +12,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .page_review_scope import PAGE_REVIEW_SCOPE, PAGE_REVIEW_TYPE, page_review_records
+from .auto_apply_policy import evaluate_auto_apply_policy, POLICY_VERSION
+from .config import kb_root, review_queue_path
+
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 # ── Load / Save ──────────────────────────────────────────────────────────────
@@ -98,6 +102,168 @@ def approved_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return filter_items(items, status="approved")
 
 
+def is_page_review_item(item: dict[str, Any]) -> bool:
+    """Return whether a queue row carries exact page review authority."""
+    return item.get("type") == PAGE_REVIEW_TYPE and item.get("scope") == PAGE_REVIEW_SCOPE
+
+
+def page_review_items(items: list[dict[str, Any]], run_id: str) -> list[dict[str, Any]]:
+    return [item for item in items if item.get("run_id") == run_id and is_page_review_item(item)]
+
+
+class QueueMutationConflict(ValueError):
+    """A reviewed page row no longer matches the exact apply authority."""
+
+
+def mark_verified_applied(
+    items: list[dict[str, Any]],
+    run_id: str,
+    review_ids: list[str],
+    verified_targets: dict[str, dict[str, Any]],
+    execution_run_id: str,
+) -> list[str]:
+    """Mark only approved page rows whose current output was verified.
+
+    This helper deliberately requires full queue IDs and compares the target
+    tuple returned by the writer/evidence reader before mutating any row.
+    """
+    if not isinstance(execution_run_id, str) or not execution_run_id.strip():
+        raise QueueMutationConflict("subset execution ID is missing")
+    if len(set(review_ids)) != len(review_ids) or not all(
+        isinstance(value, str) and value for value in review_ids
+    ):
+        raise QueueMutationConflict("subset review IDs must be unique full strings")
+    by_id = {
+        item.get("id"): item
+        for item in items
+        if item.get("run_id") == run_id and is_page_review_item(item)
+    }
+    selected: list[dict[str, Any]] = []
+    for review_id in review_ids:
+        item = by_id.get(review_id)
+        if item is None:
+            raise QueueMutationConflict(f"page review ID is not in the selected run: {review_id}")
+        if item.get("status") != "approved":
+            raise QueueMutationConflict(f"page review ID is no longer approved: {review_id}")
+        target = item.get("target")
+        fact = verified_targets.get(target) if isinstance(target, str) else None
+        if not isinstance(fact, dict):
+            continue
+        for key in ("canonical_path", "content_sha256", "object_id", "revision"):
+            if fact.get(key) != item.get(key):
+                raise QueueMutationConflict(f"verified output tuple differs for {target}: {key}")
+        selected.append(item)
+    applied_at = _stamp()
+    for item in selected:
+        item.update(
+            status="applied",
+            applied_at=applied_at,
+            applied_execution_run_id=execution_run_id,
+            applied_target=item.get("target"),
+        )
+    return [item["target"] for item in selected]
+
+
+def append_plan_review_queue(path: Path, plan: dict[str, Any]) -> int:
+    """Persist new page authority rows and retain genuine non-page blockers."""
+    items = plan.get("manual_review", [])
+    if not items:
+        return 0
+    queued = 0
+    emitted: set[str] = set()
+    records = page_review_records(plan) if plan.get("review_contract") == "page-scoped-v1" else None
+    for item in items:
+        if item.get("type") == "planned_pages_require_review" and records is not None:
+            requested = item.get("items")
+            targets = set(requested) if isinstance(requested, list) and all(isinstance(v, str) for v in requested) else None
+            for record in records:
+                target = record["target"]
+                if target in emitted or (targets is not None and target not in targets):
+                    continue
+                append_item(path, {
+                    "run_id": plan.get("run_id"), "entry": plan.get("entry"),
+                    "task": plan.get("task"), "risk": item.get("risk", "medium"),
+                    "reason": item.get("reason", "page requires review"), **record,
+                })
+                emitted.add(target)
+                queued += 1
+            continue
+        append_item(path, {"run_id": plan.get("run_id"), "entry": plan.get("entry"),
+                           "task": plan.get("task"), **item})
+        queued += 1
+    return queued
+
+
+def apply_source_auto_apply_policy(cfg: dict[str, Any], plan: dict[str, Any]) -> dict[str, int]:
+    """GP002 Auto-Apply v0.1：source 卡队列条目的机器处置（可开关，默认关闭）。
+
+    复用现有 approve/reject 变更语义，只改 status 与审计字段；不绕过 apply 链——
+    AUTO_APPLY 条目仍走 apply-approved 的 preflight/backup/write/reconcile。
+    """
+    counts = {"AUTO_APPLY": 0, "AUTO_REJECT": 0, "QUARANTINE": 0}
+    if not (cfg.get("source_auto_apply") or {}).get("enabled"):
+        return counts
+    root = kb_root(cfg)
+    queue_path = review_queue_path(cfg)
+    if not queue_path.exists():
+        return counts
+    items = [json.loads(line) for line in queue_path.read_text(encoding="utf-8").splitlines()
+             if line.strip()]
+    run_id = plan.get("run_id")
+    pages = {str(p.get("rel_path") or p.get("target") or ""): p
+             for p in plan.get("planned_pages") or [] if isinstance(p, dict)}
+    mutated = False
+    for item in items:
+        if item.get("run_id") != run_id or item.get("status") != "pending":
+            continue
+        target = str(item.get("target") or "")
+        page = pages.get(target)
+        if page is None:
+            continue
+        decision = evaluate_auto_apply_policy(
+            page, target_exists=(root / target).exists())
+        kind = decision["decision"]
+        counts[kind] = counts.get(kind, 0) + 1
+        if kind == "AUTO_APPLY":
+            item["status"] = "approved"
+            item["resolved_at"] = _stamp()
+            item["resolved_by"] = f"system-policy:{POLICY_VERSION}"
+            item["resolution_reason"] = "all source auto-apply gates passed: " +                 ", ".join(decision["reason_codes"])
+            item["auto_apply"] = {"policy_version": POLICY_VERSION,
+                                  "reason_codes": decision["reason_codes"]}
+            mutated = True
+        elif kind == "AUTO_REJECT":
+            item["status"] = "rejected"
+            item["rejection_type"] = "other"
+            item["resolved_at"] = _stamp()
+            item["resolved_by"] = f"system-policy:{POLICY_VERSION}"
+            item["resolution_code"] = decision["reason_codes"][0]
+            item["resolution_reason"] = "auto-reject: " + ", ".join(decision["reason_codes"])
+            item["auto_apply"] = {"policy_version": POLICY_VERSION,
+                                  "reason_codes": decision["reason_codes"]}
+            mutated = True
+        # QUARANTINE：保持 pending，等人工
+    # 非 page 审计行（如 source_compile_quality_issues）：仅当该 run 的全部 page
+    # 项都已 AUTO_APPLY 时同步批准（纯审计确认，不产生任何写入）；只要有 QUARANTINE
+    # 页就保持 pending，让人工整体看这个 run（保守：混合 run 不半自动）。
+    if counts["AUTO_APPLY"] > 0 and counts["QUARANTINE"] == 0:
+        for item in items:
+            if (item.get("run_id") == run_id and item.get("status") == "pending"
+                    and item.get("type") != "planned_page_review"):
+                item["status"] = "approved"
+                item["resolved_at"] = _stamp()
+                item["resolved_by"] = f"system-policy:{POLICY_VERSION}"
+                item["resolution_reason"] = ("audit row acknowledged: all pages in this "
+                                             "run were auto-applied")
+                item["auto_apply"] = {"policy_version": POLICY_VERSION,
+                                      "reason_codes": ["audit_row_all_pages_auto_applied"]}
+                counts["AUTO_APPLY"] = counts.get("AUTO_APPLY", 0) + 1
+                mutated = True
+    if mutated:
+        save_queue(queue_path, items)
+    return counts
+
+
 # ── Mutate ────────────────────────────────────────────────────────────────────
 
 def approve_item(items: list[dict[str, Any]], item_id: str, reason: str = "") -> bool:
@@ -113,12 +279,43 @@ def approve_item(items: list[dict[str, Any]], item_id: str, reason: str = "") ->
     return True
 
 
-def reject_item(items: list[dict[str, Any]], item_id: str, reason: str = "") -> bool:
-    """Mark item as rejected. Returns True if found and updated."""
+REJECTION_TYPES = ("duplicate", "quality", "policy", "other")
+
+
+def configure_reject_parser(parser: Any) -> None:
+    """GP002: review reject 参数注册（runner 行数上限收敛到 core）。"""
+    parser.add_argument("id", help="记录 ID 或前缀")
+    parser.add_argument("--reason", default="", help="拒绝理由")
+    parser.add_argument("--rejection-type", dest="rejection_type",
+                        choices=list(REJECTION_TYPES), default="other",
+                        help="拒绝类型（duplicate 跨 producer contract 存续）")
+
+
+def reject_item_typed(items: list[dict[str, Any]], item_id: str, reason: str,
+                      rejection_type: str, queue_path: Path) -> int:
+    """Reject + 落盘 + 回执语义（GP002）。返回进程退出码。"""
+    if not reject_item(items, item_id, reason, rejection_type=rejection_type):
+        print(f"未找到待确认项：{item_id}")
+        return 1
+    save_queue(queue_path, items)
+    print(f"已拒绝：{item_id}")
+    return 0
+
+
+def reject_item(items: list[dict[str, Any]], item_id: str, reason: str = "",
+                rejection_type: str = "other") -> bool:
+    """Mark item as rejected. Returns True if found and updated.
+
+    GP002: rejection_type 是唯一可计算语义（duplicate 跨 producer contract 存续；
+    quality/policy/other 保持 contract-scoped）。自由文本 reason 仅作审计。
+    """
     item = find_item(items, item_id)
     if not item:
         return False
+    if rejection_type not in REJECTION_TYPES:
+        rejection_type = "other"
     item["status"] = "rejected"
+    item["rejection_type"] = rejection_type
     item["resolved_at"] = _stamp()
     item["resolved_by"] = "user"
     if reason:
@@ -149,6 +346,7 @@ _STATUS_ICONS = {
     "pending": "⏳",
     "approved": "✅",
     "rejected": "❌",
+    "applied": "📌",
 }
 
 _RISK_COLORS = {
@@ -206,9 +404,14 @@ def format_queue_summary(items: list[dict[str, Any]]) -> str:
     n_pending = len(pending_items(items))
     n_approved = len(approved_items(items))
     n_rejected = len(filter_items(items, status="rejected"))
+    n_applied = len(filter_items(items, status="applied"))
+    known = n_pending + n_approved + n_rejected + n_applied
+    n_unknown = max(0, total - known)
     return (
         f"队列总计：{total}  "
         f"⏳待确认：{n_pending}  "
         f"✅已批准：{n_approved}  "
-        f"❌已拒绝：{n_rejected}"
+        f"❌已拒绝：{n_rejected}  "
+        f"📌已应用：{n_applied}  "
+        f"❔未知：{n_unknown}"
     )

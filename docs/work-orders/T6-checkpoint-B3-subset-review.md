@@ -1,0 +1,38 @@
+# B3 — same-plan subset review/apply and split-batch regression
+
+NOT DISPATCHED. Resume integrator only after root accepts B2. Remaining subset of T6-checkpoint-B-lifecycle.md. Public/synthetic only, no live calls/private vault/commits/subagents. Preserve others. Own focused core/review_runs.py, review_queue.py and existing apply-plan seam plus tests; no alternative writer. CLI <=1700 lines.
+
+Target: approving one page in a saved run authorizes only that exact run/target/content hash; pending/rejected siblings are never written. Retain run-level non-page blockers. Existing apply preflight/path/hash/object/revision constraints continue. Verify selected output has no links to uncommitted future sibling targets; remove only through reviewed proposal regeneration or block, never mutate approved bytes silently.
+
+Queue completion is per actually successful target. Applied siblings are not replayed on next subset apply. Per-input required-output sets from B2 become processed only when all required outputs are applied, while pending/rejected/failed outputs remain explicit. Cross-input shared outputs require exact mapping. On write failure preserve manifest/written-file evidence and do not claim atomic transaction or silently retry. A queue mutation during apply remains a visible conflict.
+
+Tests through real saved plans: approve one/pending one; approve one/reject one; forged target/content/run hash; run-level blockers; first subset then second subset; reapply idempotence; partial write failure; successful sibling not regenerated; one input with multiple required cards stays incomplete until all apply. Also compare all-at-once vs 3 split batches using normalized semantic identities/evidence, verify same-vault stable IDs/revisions and originals unchanged. Test source→seed→concept/case→topic path with real accepted generators using mocks, not prebuilt ready pages.
+
+Report docs/iteration-evidence/M3-integration/checkpoint-B3.md/json. Freeze production code for root full regression and T10 actual pipeline evaluation after handoff. No claim of semantic acceptance from schema/tests alone.
+
+## Run-history integration decision required before edits
+
+Current `assert_run_can_start` and `save_run_manifest` intentionally protect an executed run against replay/history replacement. Do not simply bypass them for a second subset. Before implementation, give root a compact concrete design for parent saved-plan identity, subset execution identity, immutable attempts, actual output verification and per-input completion. Root will resolve the design without another user approval round.
+
+Preferred direction: preserve the original bound plan and page bytes; each distinct reviewed subset executes through the existing writer with its own audit identity and an exact parent run/plan hash/selected target-hash linkage. Never rebind object IDs/revisions or regenerate approved bytes. Prior applied siblings are accepted only from matching recorded actual mutations plus current content/identity verification. A failed attempt with observed writes remains protected; queue changes must reflect verified successful targets without disguising the failed batch as atomic success. No queue status alone establishes a write.
+
+If CLI extraction is needed to stay <=1700 lines, propose one narrowly scoped application helper reusing the existing write/preflight/manifest functions. This is refactoring the single writer, not permission for an alternative writing path. B3a helper returns candidates even when blocked: only a true `can_apply_subset` and its exact `authorized_targets` map grants execution; never use `selected_pages` alone as authority.
+
+## Root architecture constraints after reading the existing apply path
+
+- `command_apply_plan` currently derives execution ID from the stored plan run ID, selects all pages, and calls `assert_run_can_start`. Keep default direct-apply behavior intact. A narrowly scoped internal subset execution context may supply selected canonical targets and a distinct audit ID only after reloading/verifying the saved parent plan and exact page review authority; a boolean `allow_reviewed` alone must never authorize a subset.
+- Preserve the parent plan bytes/hash and the originally bound `object_id`, revision, operation, base hash and content bytes. Do not write a rebound child plan to evade run guards. Hash the exact parent plan plus selected target/content tuples into the subset identity; each terminal attempt keeps immutable audit evidence through existing run-record functions.
+- Pass parent plan identity and selected-target linkage into BOTH successful and failed manifests. Current `record_failed_attempt` lacks parent/hash/subset fields; add explicit bounded context rather than losing links on the failure path. Preserve observed writes even if reporting fails.
+- Compute already-applied output facts from matching execution records plus current bytes and identity. A matching individually verified write in a failed multi-page attempt is an observed success, not permission to replay the failed attempt or mark the whole batch applied. Report the failed batch separately and require a fresh, separately authorized remainder operation if continuation is supported.
+- Re-read the queue at the write boundary and compare reviewed authority; retain the existing post-write conflict detection. This is single-process safety, not a claim of transactional cross-process locking.
+- Feed B2 completion from exact required-target closure across linked subset executions. Source/seed per-input completion and derived stage completion have different granularity; do not restore broad `sources` membership as proof that all required outputs were written.
+
+These are design constraints, not a pre-approved implementation sketch. Integrator still supplies the compact concrete API/file design at the B3 checkpoint. Do not start production B3 edits before B2 acceptance.
+
+Architecture proposal and root overriding decisions: docs/iteration-evidence/M3-integration/B3-architecture-proposal.md. Read the final Astra decision section before implementation. Partial approval remains pending and never authorizes regeneration; three input batches remain a separate acceptance case from three subset applications.
+
+## Root real-manifest BEFORE evidence
+
+Root exercised two actual source-generator pages through save/review/apply, then fed the actual manifests to accepted B3b. Normal success: 2 actual writes, 2 verified, no conflicts. Injected failure before second write: 1 actual write retained by the failed run, but B3b correctly refuses it because the failed manifest lacks exact plan hash linkage (`manifest_linkage_missing`). Evidence: `docs/iteration-evidence/astra-B3-actual-manifest-before.json`; probe `.execution/astra-B3-actual-manifest-before.py`. This is a production integration gap, not permission to weaken the reader. Add exact saved parent/plan hash linkage to failed evidence, preserve failed batch status, and verify its one observed target through the shared reader. Reuse the actual-generator setup when retargeting AFTER; the snapshot helper asserts old aggregate queue behavior and must not be used unchanged after B3.
+
+Independent desired acceptance tests are `tests/test_subset_apply_blackbox.py`; root required exact two page authorities, first/second subset writes, reject isolation and idempotence. Their passing old-behavior comparator was preserved outside collection as `.execution/b3-subset-before-test-snapshot.py`. Desired BEFORE reports/logs remain immutable. Do not edit or weaken independent tests; return concrete fixture issues to root.

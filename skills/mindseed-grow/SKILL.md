@@ -5,6 +5,10 @@ description: 将 quicknote、inbox 以及用户指定 raw 中的碎片转化为�
 
 # Skill：mindseed-grow
 
+## 生成模式（M1 起）
+
+`seed_generation.mode` 默认 **atomic**：一卡一个可独立表达的念头，从带原始字节校验的信息单元提炼（见 `docs/seed-quality.md`）。显式配置 `"mode": "topic"` 保留下方旧聚类通路，旧语义不变；无模型时 atomic 只产出明确标注的受限预览，不声称达标。
+
 ## 定位
 
 碎片信息生长。将临时记录、剪藏、想法、问题、案例片段和短材料整理成“知识种子”，为后续专题、概念、证据包、写作材料包和工作记忆提供生长入口。
@@ -68,7 +72,7 @@ seed-card
 title:
 type: seed-card
 status: seed
-stage: seed
+stage: candidate
 created:
 updated:
 sources:
@@ -79,15 +83,13 @@ review_required:
 ---
 ```
 
-`status` 使用全局生命周期状态。seed 的流程态写入 `stage`，默认与 `status` 一致：
+来源不足或关联不确定时使用 `status: manual_review` + `stage: needs_context`；不得把 `stage: seed`、`draft` 或 `assembling` 写成 seed-card 的新产物状态。
+
+`status` 使用全局生命周期状态。新产物（M1 合同）的合法配对由 `core/schemas/seed-card.schema.json` 强制：
 
 ```text
-seed
-growing
-merged
-compiled
-archived
-manual_review
+status: seed          + stage: candidate          （正常候选）
+status: manual_review + stage: needs_context      （需人工确认）
 ```
 
 本 Skill 默认只能创建：
@@ -97,7 +99,7 @@ seed
 manual_review
 ```
 
-不得直接创建 `compiled` 状态。
+不得直接创建 `compiled` 状态。旧页只读兼容，不做迁移。
 
 ## 正文结构
 
@@ -148,12 +150,12 @@ manual_review
 
 1. 建立来源索引，确保每个来源路径真实存在。
 2. 判断碎片类型：事实、案例、观点、问题、项目记录、写作素材、工具资料。
-3. 对同主题碎片做轻量聚类，优先生成“主题型 seed”，避免一篇原文一张低价值卡。
-4. 每张 seed 只表达一个核心问题或主题。
+3. 默认 atomic 模式每张 seed 只表达一个可独立复述的念头，保留归因、具体来源、证据信号和可生长方向；不把多条碎片默认为一个主题结论。
+4. 只有显式配置 `seed_generation.mode: topic` 才走旧的同主题聚类兼容路径；这不是默认质量标准，也不改变来源和人工审核要求。
 5. 用具体来源列表写入 `sources`，不得写 `raw/` 这种粗路径。
 6. 检查 `wiki/seeds/` 中是否已有近似 seed。
 7. 若已有近似 seed，追加来源和更新记录，不新建重复页。
-8. 不下最终结论，只写“可能生长为”的方向。
+8. 不下最终结论，只写有来源支撑的信号和“可能生长为”的方向。
 
 ## raw 输入限制
 
@@ -212,10 +214,12 @@ work-memory-weave
 - 至少 1 个真实来源。
 - 来源路径必须具体到文件。
 - 相关链接必须可解析，或标记为待确认。
+- atomic seed 应保留一个独立念头、归因/证据信号和可生长方向；主题词或模型推测不能替代来源。
 - 不得复制大段原文。
 - 不得把模型推测写成事实。
 - 不得将原始资料直接升格为结论。
 - 如果来源不足、主题不清、链接不确定，`status: manual_review`。
+- 显式有效的零结果可以记录为零结果；畸形输入、无法校验的来源或失败不得伪装成零结果。
 
 ## 失败处理
 

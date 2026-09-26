@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from .config import processed_index_path, read_json, state_path
+from .content_identity import match_content_identity
 from .safety import safe_write_text
 from .vault import Note, VaultIndex
 
@@ -79,11 +80,23 @@ def processed_record(data: dict[str, Any], note: Note, skill: str) -> dict[str, 
 
 def is_processed(data: dict[str, Any], note: Note, skill: str) -> bool:
     record = processed_record(data, note, skill)
-    return bool(
-        record
-        and record.get("sha256") == note.sha256
-        and record.get("operation_status") in {"created", "skipped"}
-    )
+    if not (record and record.get("operation_status") in {"created", "skipped"}):
+        return False
+    if record.get("sha256") == note.sha256:
+        return True
+    # GP002: byte hash 不同时，用 content identity 兜底（CRLF/LF/BOM 表示漂移
+    # 属同一内容）；漂移判定需要当前字节，仅在 byte/identity 双未命中时读取。
+    recorded_identity = record.get("content_identity_sha256")
+    note_identity = getattr(note, "content_identity_sha256", "") or ""
+    if recorded_identity and note_identity and recorded_identity == note_identity:
+        return True
+    try:
+        raw = note.path.read_bytes()
+    except OSError:
+        return False
+    kind = match_content_identity(
+        record.get("sha256"), recorded_identity, raw)["kind"]
+    return kind in {"BYTE_MATCH", "IDENTITY_MATCH", "REPRESENTATION_DRIFT"}
 
 
 def unprocessed_notes(data: dict[str, Any], notes: list[Note], skill: str) -> list[Note]:
@@ -101,7 +114,6 @@ def update_processed_index(index: VaultIndex, cfg: dict[str, Any], operations: l
         source_outputs = op.get("source_outputs", {})
         has_review_gate = bool(op.get("manual_reviews")) or bool(op.get("review_required")) or str(op.get("confidence", "")).lower() == "low"
         has_issues = bool(op.get("issues"))
-        operation_status = "needs_review" if has_review_gate or has_issues else ("created" if outputs else "skipped")
         for rel in op.get("inputs", []):
             note = index.by_rel.get(rel)
             if not note:
@@ -113,11 +125,29 @@ def update_processed_index(index: VaultIndex, cfg: dict[str, Any], operations: l
             })
             file_record["title"] = note.title
             file_record["current_sha256"] = note.sha256
+            # GP002: content identity 与 byte hash 并列写 forward（byte 语义不变）。
+            note_identity = getattr(note, "content_identity_sha256", "") or ""
+            if note_identity:
+                file_record["content_identity_sha256"] = note_identity
             rel_outputs = source_outputs.get(rel, outputs)
-            file_record["skills"][skill] = {
+            # Status is decided per source, not per operation: one operation can
+            # carry several sources whose outcomes differ (a written page next to
+            # a deliberately rejected one).  Reporting the whole operation's
+            # status for every source would label a declined source "created"
+            # with no outputs.
+            if has_review_gate or has_issues:
+                operation_status = "needs_review"
+            elif rel_outputs:
+                operation_status = "created"
+            else:
+                operation_status = "skipped"
+            skill_record = {
                 "sha256": note.sha256,
                 "processed_at": timestamp,
                 "outputs": rel_outputs,
                 "operation_status": operation_status,
             }
+            if note_identity:
+                skill_record["content_identity_sha256"] = note_identity
+            file_record["skills"][skill] = skill_record
     save_processed_index(data, cfg, timestamp)

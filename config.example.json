@@ -12,21 +12,55 @@
   "knowledge_base": "${AGENT_HOME}\\kb-template",
   "state_file": "${AGENT_HOME}\\.openclaw\\personal-kb-steward-state.json",
   "scan": {
-    "include_dirs": ["quicknote", "inbox", "raw", "wiki"],
-    "exclude_dirs": [".obsidian", "outputs", "archive"],
-    "extensions": [".md"],
+    "include_dirs": [
+      "quicknote",
+      "inbox",
+      "raw",
+      "wiki"
+    ],
+    "retrieval_include_dirs": [
+      "raw",
+      "quicknote",
+      "inbox"
+    ],
+    "exclude_dirs": [
+      ".obsidian",
+      "outputs",
+      "archive"
+    ],
+    "extensions": [
+      ".md"
+    ],
     "max_files_per_run": 20,
     "max_source_chars": 6000,
     "max_total_source_chars": 0,
     "exclude_files": [],
     "raw_seed_max_chars": 2000,
-    "seed_markers": ["#seed", "#随手记", "#待生长"]
+    "seed_markers": [
+      "#seed",
+      "#随手记",
+      "#待生长"
+    ]
   },
   "clustering": {
     "mode": "dynamic",
     "max_clusters": 5,
     "min_sources_for_confident_cluster": 2,
     "allow_fixed_theme_rules": false
+  },
+  "seed_generation": {
+    "mode": "atomic"
+  },
+  "card_pipeline": {
+    "mode": "typed",
+    "topic_questions": [],
+    "related_paths_cap": 6,
+    "topic_source_cap": 6
+  },
+  "topic_generation": {
+    "min_full_sources": 3,
+    "max_source_chars": 20000,
+    "max_context_chars": 60000
   },
   "write": {
     "seed_dir": "wiki/seeds",
@@ -47,12 +81,97 @@
     "index_title": "个人知识库"
   },
   "knowledge_model": {
-    "statuses": ["raw", "seed", "growing", "compiled", "linked", "stale", "conflict", "archived", "manual_review"],
-    "types": ["source-note", "seed-card", "literature-note", "atomic-note", "concept-page", "topic-page", "topic-card", "evidence-pack", "material-pack", "work-memory", "decision-record", "case-story", "gap-report", "claim-check", "lint-report", "run-report"],
-    "required_frontmatter": ["title", "type", "status", "stage", "created", "updated", "sources", "related", "tags", "confidence", "review_required"],
-    "legacy_frontmatter": ["source"],
-    "workflow_stages": ["seed", "growing", "compiled", "linked", "merged", "archived", "needs_review", "active", "waiting", "blocked", "done", "candidate", "promising", "ready_for_evidence", "rejected", "collecting", "compiling", "assembling", "draft", "draft_ready", "checking", "verified", "strong", "medium", "weak", "unsupported", "insufficient", "needs_context", "open", "partially_resolved", "resolved", "usable", "validated", "actionable"],
-    "relationship_types": ["source_of", "supports", "contradicts", "extends", "example_of", "part_of", "mentions", "next_step"]
+    "statuses": [
+      "raw",
+      "seed",
+      "growing",
+      "compiled",
+      "linked",
+      "stale",
+      "conflict",
+      "archived",
+      "manual_review"
+    ],
+    "types": [
+      "source-note",
+      "seed-card",
+      "literature-note",
+      "atomic-note",
+      "concept-page",
+      "topic-page",
+      "topic-card",
+      "evidence-pack",
+      "material-pack",
+      "work-memory",
+      "decision-record",
+      "case-story",
+      "gap-report",
+      "claim-check",
+      "lint-report",
+      "run-report"
+    ],
+    "required_frontmatter": [
+      "title",
+      "type",
+      "status",
+      "stage",
+      "created",
+      "updated",
+      "sources",
+      "related",
+      "tags",
+      "confidence",
+      "review_required"
+    ],
+    "legacy_frontmatter": [
+      "source"
+    ],
+    "workflow_stages": [
+      "seed",
+      "growing",
+      "compiled",
+      "linked",
+      "merged",
+      "archived",
+      "needs_review",
+      "active",
+      "waiting",
+      "blocked",
+      "done",
+      "candidate",
+      "promising",
+      "ready_for_evidence",
+      "rejected",
+      "collecting",
+      "compiling",
+      "assembling",
+      "draft",
+      "draft_ready",
+      "checking",
+      "verified",
+      "strong",
+      "medium",
+      "weak",
+      "unsupported",
+      "insufficient",
+      "needs_context",
+      "open",
+      "partially_resolved",
+      "resolved",
+      "usable",
+      "validated",
+      "actionable"
+    ],
+    "relationship_types": [
+      "source_of",
+      "supports",
+      "contradicts",
+      "extends",
+      "example_of",
+      "part_of",
+      "mentions",
+      "next_step"
+    ]
   },
   "quality_gate": {
     "require_frontmatter": true,
@@ -75,17 +194,41 @@
     "manual_review_queue": "${AGENT_HOME}\\.openclaw\\manual-review\\queue.jsonl",
     "backup_dir": "${AGENT_HOME}\\.openclaw\\backups",
     "operation_log": "${AGENT_HOME}\\.openclaw\\operation-log.jsonl",
-    "high_risk_operations": ["delete", "move", "rename", "merge", "rewrite_raw"],
-    "protected_dirs": ["raw", "quicknote", "inbox"]
+    "high_risk_operations": [
+      "delete",
+      "move",
+      "rename",
+      "merge",
+      "rewrite_raw"
+    ],
+    "protected_dirs": [
+      "raw",
+      "quicknote",
+      "inbox"
+    ]
   },
   "routing": {
     "default_entry": "organize_kb",
-    "user_entries": ["organize_kb", "discover_topics", "prepare_writing", "weave_work_memory", "healthcheck"],
+    "user_entries": [
+      "organize_kb",
+      "discover_topics",
+      "prepare_writing",
+      "weave_work_memory",
+      "healthcheck"
+    ],
     "workflows_file": "workflows.json",
     "router_file": "router.json",
-    "daily": ["organize_kb", "weave_work_memory"],
-    "weekly": ["healthcheck"],
-    "on_demand": ["discover_topics", "prepare_writing"]
+    "daily": [
+      "organize_kb",
+      "weave_work_memory"
+    ],
+    "weekly": [
+      "healthcheck"
+    ],
+    "on_demand": [
+      "discover_topics",
+      "prepare_writing"
+    ]
   },
   "methodology": {
     "principles": [
@@ -100,5 +243,11 @@
   "candidate_promotion": [],
   "finalize_aggregation": {},
   "heuristic_topics": [],
-  "link_resolution": {"obsidian_compat": false}
+  "link_resolution": {
+    "obsidian_compat": false
+  },
+  "source_auto_apply": {
+    "enabled": false,
+    "policy_version": "source-auto-apply-v0.1"
+  }
 }

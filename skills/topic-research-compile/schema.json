@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "topic-research-compile-envelope.schema.json",
+  "title": "topic-research-compile typed payload envelope (M0)",
+  "type": "object",
+  "required": ["items"],
+  "additionalProperties": true,
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {"$ref": "source-note.schema.json"}
+    }
+  }
+}

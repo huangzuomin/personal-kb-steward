@@ -27,7 +27,8 @@ class MvpSkillExecutorTests(unittest.TestCase):
 
     def test_mindseed_executor_returns_page_specs(self):
         result = execute_skill(ROOT, "mindseed-grow", {
-            "config": {"clustering": {"max_clusters": 3}},
+            # Explicit legacy topic mode: this test pins the clustering page shape.
+            "config": {"clustering": {"max_clusters": 3}, "seed_generation": {"mode": "topic"}},
             "notes": [
                 {"rel": "quicknote/a.md", "title": "Cursor 课堂", "body": "Cursor AI 编程课堂演示", "summary": "Cursor 课堂"},
                 {"rel": "quicknote/b.md", "title": "Cursor 复盘", "body": "Cursor 重构测试脚本", "summary": "Cursor 复盘"},

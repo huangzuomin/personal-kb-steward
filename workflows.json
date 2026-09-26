@@ -2,6 +2,16 @@
   "version": 1,
   "default_entry": "organize_kb",
   "entries": {
+    "case_bank": {
+      "label": "生成案例卡",
+      "description": "从符合条件的已沉淀 source note 生成 case-story 候选；单来源可为完整案例，证据不足如实受限。",
+      "aliases": ["生成案例卡", "案例卡", "生成案例", "案例库"],
+      "primary_skill": "case-story-bank-builder",
+      "pipeline": ["case-story-bank-builder"],
+      "follow_up_skills": [],
+      "writes_by_default": ["wiki/cases"],
+      "risk_policy": "案例候选一律 review 后 apply；无模型或证据不足时如实记录 blocked/disabled，不声称生成。"
+    },
     "organize_kb": {
       "label": "整理知识库",
       "description": "把 quicknote/inbox 中的碎片整理为可追溯 seed；raw 长文由专门链路处理。",

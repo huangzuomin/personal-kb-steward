@@ -1,0 +1,15 @@
+# T0 public fixtures and rubric — bounded execution
+
+You are Claude coding/fixture agent. Astra owns plan and acceptance. Other workers share this checkout; preserve their changes. Start writing this small deliverable; no broad repo exploration.
+
+Read AGENTS.md; operate ONLY inside checkout, no private/parent vaults, original demo files, .env/config.json/global credentials. No model/API/network calls, installs, commits/push, subagents or permission bypass. Public source and newly authored clearly synthetic materials only.
+
+Ownership ONLY: docs/demo-baseline-rubric.md, tests/fixtures/card-baseline/*, tests/test_baseline_fixtures.py, docs/iteration-evidence/T0/*. Do not modify schemas/contracts/runtime/generators/config/CLI or existing tests. There are no private demo files in your permitted input. User already accepts the baseline quality; do not request reapproval.
+
+Deliver three substantive Chinese synthetic materials, each clearly marked SYNTHETIC (not real-world factual claims): (1) user/AI dialogue containing distinguishable user thoughts and AI proposals; (2) uncited AI-style research summary including illustrative numbers with no verifiable primary source; (3) narrated project case with concrete actions/results and a separable reusable mechanism, plus limits. Use original public fictional subject matter; do not copy private demo titles/content. Each 500–1200 Chinese characters is enough. Add short irrelevant/empty/damaged/repeated-quote negative fixtures, preserve existing damaged industry_report unchanged.
+
+Create manifest.json listing fixture id/path/material_kind/expected_speaker markers, expected independently meaningful units and prohibited overclaims. Expected units are semantic descriptions, not full golden model cards or exact required prose. Do not fabricate hash strings. A small pytest validates files/manifest/negative-case intentional damage and writes a computed SHA256 snapshot of raw fixture bytes to docs/iteration-evidence/T0/fixture-hashes.json.
+
+Rubric for five types (minimum, not optional): source original provenance+summary+key statements+topic hints+material-specific quality; seed one thought+attribution+specific growth/counterexample or boundary+honest links; concept definition+explanation+near-concept boundary+aliases if justified; case context/action/result/mechanism/applicability/evidence with unverified numbers marked; topic source map+supported disagreement/context differences+gaps+ranked next steps. Empty/no conflict/no relation can be correct when explicitly justified; no fabricated count quotas. Separate machine checks and human semantic pass/revise/fail, cannot pass semantic quality with schema alone. Rubric should map source fixture IDs to observable acceptance questions.
+
+Run python -m pytest -q tests/test_baseline_fixtures.py under provided UTF8 env; preserve test log. report.md/report.json with changed files, hash artifact, actual checks and note these are public synthetic fixtures, not private-demo validation. Finish this bounded task without touching other owners.

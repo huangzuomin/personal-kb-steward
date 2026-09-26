@@ -1,0 +1,12 @@
+{
+  "description": "公开合成素材：M2 概念/案例生成器的离线测试夹具。全部人物、组织与数字均为虚构。",
+  "provenance": "synthetic / public test fixture",
+  "files": {
+    "concept_source_01.md": "包含一个可提取概念（回顾触发器）与自报数字的来源素材",
+    "case_source_01.md": "项目级案例素材（读书会书单活动，含自报结果数字）",
+    "case_source_02.md": "机制复用案例素材（社区团购群照搬失败，含自报数字与个人归因）",
+    "neg_chatter.md": "无概念、无案例的闲聊素材（应产出合法 zero）",
+    "neg_empty.md": "空文件（无实质内容）",
+    "neg_repeated_quote.md": "同一句子出现两次（重复片段需 start_line 消歧）"
+  }
+}

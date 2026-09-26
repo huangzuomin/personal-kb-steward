@@ -1,5 +1,6 @@
 """Run actual producer -> review -> apply -> audit paths, with only LLM I/O stubbed."""
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -10,6 +11,7 @@ from unittest import TestCase, skipUnless
 from unittest.mock import patch
 
 from core.knowledge_objects import ObjectIdentityError, new_object_id
+from core.review_queue import is_page_review_item
 from core.run_records import RunRecordConflict
 from core.vault import build_index
 from scripts import personal_kb_steward as steward
@@ -39,10 +41,28 @@ class ProducerRecoveryTests(TestCase):
             self.assertEqual(steward.command_review(self.cfg, SimpleNamespace(review_command='approve', id=item['id'], reason='fixture evidence reviewed')), 0)
         if queued:
             self.assertEqual(steward.command_review(self.cfg, SimpleNamespace(review_command='apply-approved')), 0)
-            self.assertTrue(all(x['status'] == 'applied' for x in steward.load_queue(steward.review_queue_path(self.cfg)) if x['run_id'] == plan['run_id']))
+            queue_after = [x for x in steward.load_queue(steward.review_queue_path(self.cfg)) if x['run_id'] == plan['run_id']]
+            if plan.get('review_contract') == 'page-scoped-v1':
+                page_rows = [x for x in queue_after if is_page_review_item(x)]
+                other_rows = [x for x in queue_after if not is_page_review_item(x)]
+                self.assertTrue(page_rows)
+                self.assertTrue(all(x['status'] == 'applied' for x in page_rows))
+                self.assertTrue(all(x['status'] == 'approved' for x in other_rows))
+                subset_paths = sorted((self.root / '.openclaw/runs').glob(f"{plan['run_id']}.subset-*.json"))
+                self.assertEqual(len(subset_paths), 1)
+                manifest_path = subset_paths[0]
+                subset_manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+                self.assertTrue(subset_manifest['processed_index_advanced'])
+                self.assertEqual(subset_manifest['parent_run_id'], plan['run_id'])
+                self.assertEqual(subset_manifest['parent_plan_path'], str(path))
+                self.assertEqual(subset_manifest['parent_plan_sha256'], hashlib.sha256(path.read_bytes()).hexdigest())
+            else:
+                self.assertTrue(all(x['status'] == 'applied' for x in queue_after))
+                manifest_path = self.root / '.openclaw/runs' / f"{plan['run_id']}.json"
         else:
             self.assertEqual(steward.command_apply_plan(self.cfg, str(path)), 0)
-        manifest = json.loads((self.root / '.openclaw/runs' / f"{plan['run_id']}.json").read_text(encoding='utf-8'))
+            manifest_path = self.root / '.openclaw/runs' / f"{plan['run_id']}.json"
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
         self.assertEqual(manifest['status'], 'applied')
         by_path = {x['rel_path']: x for x in manifest['created']}
         self.assertEqual(len(by_path), len(plan['planned_pages']))
@@ -67,14 +87,21 @@ class ProducerRecoveryTests(TestCase):
         self.apply_produced(lambda: steward.command_task(self.cfg, '整理知识库'))
 
     def test_real_init_review_apply_tracks_objects_and_processed_sources(self):
-        answer = json.dumps({'source_summary': 'An evidence record about reusable knowledge.',
-                             'key_facts': ['The source contains an evidence record.'], 'quality_flags': [],
+        answer = json.dumps({'summary': 'An evidence record about reusable knowledge.',
+                             'key_statements': [{'text': 'An evidence record.',
+                                                 'quote': 'An evidence record.',
+                                                 'kind': 'assertion'}],
+                             'quality_flags': [],
                              'topics': [{'topic_title': 'Evidence records', 'topic_stub_content': 'Study reusable source records.'}]})
         with patch('core.llm.call_chat_completion', return_value=answer) as provider:
             self.apply_produced(lambda: steward.command_init_kb(self.cfg, use_llm=True))
         self.assertTrue(provider.called)
 
     def test_real_finalize_can_update_existing_objects_in_second_run(self):
+        # Explicit legacy opt-in: this test asserts the OLD aggregation and
+        # source-note backlink update behavior (typed default has no card_state
+        # eligible sources here and would produce no aggregation pages).
+        self.cfg["card_pipeline"] = {"mode": "legacy"}
         for name in ('a', 'b'):
             self.case.install_note(f'wiki/sources/{name}.md', self.case.content('## 关键事实\n- A measured observation.').replace('topic-page', 'source-note'))
         first, _ = self.apply_produced(lambda: steward.command_finalize_kb(self.cfg))

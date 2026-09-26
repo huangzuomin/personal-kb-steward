@@ -83,6 +83,33 @@ needs_context
 
 不得直接创建 `stage: usable`，除非背景、行动、结果和来源都完整。
 
+## 生成器入口（M2）
+
+案例卡的自动生成走 `core.case_generation.generate_cases`：
+
+```python
+from core.case_generation import generate_cases
+result = generate_cases(notes, cfg, *, known_paths=None,
+                        analysis_mode="llm", call_provider=None, now=None)
+```
+
+- 输入 note 与 source 生产线一致（rel/title/body/metadata/source_text/source_sha256
+  完整原始快照 + 原始字节 hash）；`metadata.upstream_analysis` 可附上游登记的
+  `source_kind`/`limitations`/`speakers`（allow-list、限量，模型不可删除）。
+- 返回 `{state, reason, items, pages, claims, analysis, issues}`；
+  `pages[].content` 的 frontmatter 已持久化 `card_state`（claims 可经
+  `core.claims.validate_claims` 对同一原始快照严格重载）。
+- 结果陈述（数字或定性观察）、可复用机制、机制推断、适用条件的权威文字一律是
+  所引编译判断的原句（单一权威文本）：机制来源陈述用 fact 判断
+  （`reusable_mechanism_claim`），机制推断必须绑 kind=inference 判断
+  （`mechanism_inference_claim`），条件逐项给 claim 引用。引用不合法即整条丢弃并记
+  诊断，不为填空编造机制；模型给的平行展示文本与判断原文不一致时被忽略。
+  `uncertainties` 是待研究问题（页面标注"模型整理，非来源事实"）。
+  来源断言一律 `source_asserted: true`，不代表独立验证。
+- `card_level` 区分 project / mechanism；同一故事+同一判断集在两个层级重复登记时，
+  第二张强制 `manual_review/needs_context`。查重为证据并集式合并，不丢证据。
+- 单一来源可以成卡：没有跨来源数量配额；证据不足 → stub，不编造。
+
 ## 正文结构
 
 ```markdown

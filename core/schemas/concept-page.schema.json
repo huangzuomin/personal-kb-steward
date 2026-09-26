@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "concept-page.schema.json",
+  "title": "Canonical concept-page contract (M2, evidence-qualified generation)",
+  "type": "object",
+  "required": [
+    "title", "type", "status", "stage", "sources", "summary",
+    "confidence", "review_required", "schema_version", "analysis_mode",
+    "concept_name", "definition", "explanation",
+    "source_defined_boundary", "suggested_interpretation", "aliases",
+    "provenance_map", "claims"
+  ],
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "anyOf": [
+        {"properties": {"status": {"const": "growing"}, "stage": {"const": "draft"}}, "required": ["status", "stage"]},
+        {"properties": {"status": {"const": "manual_review"}, "stage": {"const": "needs_context"}}, "required": ["status", "stage"]}
+      ]
+    }
+  ],
+  "properties": {
+    "title": {"type": "string", "minLength": 1},
+    "type": {"const": "concept-page"},
+    "status": {"enum": ["growing", "manual_review"]},
+    "stage": {"enum": ["draft", "needs_context"]},
+    "sources": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1
+    },
+    "summary": {"type": "string"},
+    "confidence": {"enum": ["high", "medium", "low"]},
+    "review_required": {"type": "boolean"},
+    "schema_version": {"type": "string", "minLength": 1},
+    "generator_version": {"type": ["string", "null"]},
+    "analysis_mode": {"enum": ["llm", "heuristic", "heuristic-fallback", "unknown"]},
+    "source_hashes": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "coverage": {
+      "type": ["string", "null"],
+      "enum": ["full", "partial", "unknown", null]
+    },
+    "related": {"type": "array", "items": {"type": "string"}},
+    "pending_links": {"type": "array", "items": {"type": "string"}},
+    "manual_review": {"type": "array", "items": {"type": "string"}},
+    "quality_flags": {"type": "array", "items": {"type": "string"}},
+    "concept_name": {"type": "string", "minLength": 1},
+    "definition": {"type": "string", "minLength": 1},
+    "definition_claim": {"type": "string", "minLength": 1},
+    "explanation": {"type": "string"},
+    "aliases": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "source_defined_boundary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["statement", "claim_ids"],
+        "properties": {
+          "statement": {"type": "string", "minLength": 1},
+          "claim_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "suggested_interpretation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["text", "claim_ids", "inference"],
+        "properties": {
+          "text": {"type": "string", "minLength": 1},
+          "supporting_claim": {"type": "string"},
+          "supporting_context": {"type": "string"},
+          "claim_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "inference": {"const": true}
+        },
+        "additionalProperties": false
+      }
+    },
+    "provenance_map": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rel", "provenance", "limitations"],
+        "properties": {
+          "rel": {"type": "string", "minLength": 1},
+          "source_sha256": {"type": "string"},
+          "provenance": {"type": "string"},
+          "source_kind": {"type": "string"},
+          "limitations": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "shared_provenance": {"type": "array", "items": {"type": "string"}},
+    "claims": {
+      "type": "array",
+      "items": {"type": "object"},
+      "minItems": 0
+    }
+  }
+}

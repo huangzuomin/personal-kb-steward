@@ -1,0 +1,116 @@
+{% include 'base_frontmatter.j2' with context %}
+# 专题：{{ title }}
+
+> **研究问题：** {{ research_question }}
+
+{% if limited_stub %}
+> **范围限制：** 本页是受限的 topic stub（{{ limited_reason }}）。它不代表完整专题基线，
+> 不得当作 full-topic 结论使用；需补充来源并经人工审核后才能升级。
+{% endif %}
+
+## 主题边界与核心关注点
+
+{{ theme_boundary }}
+
+## 小结
+
+{{ summary }}
+
+## 来源地图
+
+{% for entry in source_map %}
+### {{ entry.rel }}
+
+- **Provenance**：{{ entry.provenance }}
+{% for limit in entry.limitations %}
+- **限制**：{{ limit }}
+
+{% endfor %}
+{% endfor %}
+
+{% if shared_provenance %}
+## 共享来源提示
+
+{% for flag in shared_provenance %}
+- {{ flag }}
+{% endfor %}
+{% endif %}
+
+## 已支持的判断（逐字原文依据）
+
+> 片段匹配不等于事实已核实；判断置信度为模型判断，需人工审核。
+> 事实（fact）是陈述类别，不表示已获外部验证。
+
+{{ claims_section }}
+
+## 分歧与语境差异
+
+> 以下分类由模型提出，语义对立未经程序核实，均待人工复核。
+
+{% if tensions %}
+{% for t in tensions %}
+### {{ t.classification_label }}
+
+{{ t.statement }}
+
+- 分类：{{ t.classification }}
+{% if t.sources %}
+- 涉及来源：{{ t.sources | join('；') }}
+{% endif %}
+{% if t.note %}
+- 说明：{{ t.note }}
+{% endif %}
+{% endfor %}
+{% else %}
+- 本专题未发现需要记录的实质性分歧。**“无冲突”是合法结论**，不强行制造对立。
+{% endif %}
+
+## 证据缺口
+
+{% if evidence_gaps %}
+{% for line in gap_lines %}
+- {{ line }}
+{% endfor %}
+{% else %}
+- 未记录证据缺口。
+{% endif %}
+
+## 下一步行动
+
+{% if next_actions %}
+{% for line in action_lines %}
+- {{ line }}
+{% endfor %}
+{% else %}
+- 未记录下一步行动。
+{% endif %}
+
+## 双链索引
+
+{% if related %}
+{% for rel in related %}
+- [[{{ rel }}]]
+{% endfor %}
+{% else %}
+- （无已确认存在的关联对象）
+{% endif %}
+
+{% if pending_links %}
+## 待创建链接（裸文本路径，尚未成为双链）
+
+{% for path in pending_links %}
+- `{{ path }}`
+{% endfor %}
+{% endif %}
+
+## 生成质量标注
+
+{% if generation_issues %}
+{% for issue in generation_issues %}
+- {{ issue }}
+{% endfor %}
+{% else %}
+- 本页生成过程中未记录问题。
+{% endif %}
+- coverage 表示本次输入的读取覆盖情况，与来源数量是否充足相互独立。
+

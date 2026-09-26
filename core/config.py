@@ -78,6 +78,48 @@ def kb_root(cfg: dict[str, Any]) -> Path:
     return resolve_path(cfg["knowledge_base"])
 
 
+SEED_GENERATION_MODES = frozenset({"atomic", "topic"})
+
+
+def seed_generation_mode(cfg: dict[str, Any] | None) -> str:
+    """Seed generation mode; default only when the field is absent. Present
+    values must be a valid string mode — false/0/empty/other types are
+    rejected, never coerced. M0 ships the seam only; the atomic generator's
+    behavior itself is M1 work. Callers validate before any model call."""
+    if cfg is None or "seed_generation" not in cfg:
+        return "atomic"
+    section = cfg.get("seed_generation")
+    if not isinstance(section, dict):
+        raise ValueError(f"seed_generation 必须是对象，当前为：{type(section).__name__}")
+    if "mode" not in section:
+        return "atomic"
+    mode = section["mode"]
+    if not isinstance(mode, str) or mode not in SEED_GENERATION_MODES:
+        raise ValueError(f"seed_generation.mode 只能是 atomic 或 topic，当前为：{mode!r}")
+    return mode
+
+
+CARD_PIPELINE_MODES = frozenset({"typed", "legacy"})
+
+
+def card_pipeline_mode(cfg: dict[str, Any] | None) -> str:
+    """Card pipeline mode: default "typed" (A2 discovery from eligible
+    persisted sources) unless an EXPLICIT legacy configuration opts a vault
+    back into the old candidate_promotion/aggregation behavior. Present
+    invalid values are rejected, never coerced."""
+    if cfg is None or "card_pipeline" not in cfg:
+        return "typed"
+    section = cfg.get("card_pipeline")
+    if not isinstance(section, dict):
+        raise ValueError(f"card_pipeline 必须是对象，当前为：{type(section).__name__}")
+    if "mode" not in section:
+        return "typed"
+    mode = section["mode"]
+    if not isinstance(mode, str) or mode not in CARD_PIPELINE_MODES:
+        raise ValueError(f"card_pipeline.mode 只能是 typed 或 legacy，当前为：{mode!r}")
+    return mode
+
+
 def state_path(cfg: dict[str, Any]) -> Path:
     return resolve_path(cfg["state_file"], kb_home=str(kb_root(cfg)))
 

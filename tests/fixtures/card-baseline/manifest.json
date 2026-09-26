@@ -1,0 +1,149 @@
+{
+  "_comment": "T0 公开合成测试素材清单。所有素材均为 SYNTHETIC 合成内容，非真实事实主张，与私有 demo 素材无关。",
+  "fixtures": [
+    {
+      "id": "dialogue_user_ai_01",
+      "path": "tests/fixtures/card-baseline/dialogue_user_ai_01.md",
+      "material_kind": "user_ai_dialogue",
+      "synthetic": true,
+      "expected_speaker_markers": ["林舟（用户）", "AI 助手（提案"],
+      "expected_units": [
+        "至少一条用户自身的想法/自我归因（如：复制粘贴式收藏、从不删东西、收藏与写作目标错配）",
+        "至少一条带归属的 AI 提案（提问式摘录 / 归档规则 / 反向过滤）",
+        "至少一个具体的成长点、反例或适用边界（提案三的选题漂移边界，或用户对模板退化的担忧）"
+      ],
+      "prohibited_overclaims": [
+        "不得把对话中的任何说法当作已核实事实",
+        "不得声称对话内容来自真实人物或真实事件"
+      ]
+    },
+    {
+      "id": "research_summary_uncited_01",
+      "path": "tests/fixtures/card-baseline/research_summary_uncited_01.md",
+      "material_kind": "uncited_research_summary",
+      "synthetic": true,
+      "expected_speaker_markers": ["SYNTHETIC", "示意性"],
+      "expected_units": [
+        "可概括的主题（虚构临川市共享单车调度/潮汐淤积）",
+        "至少一条定性判断（如：调度只能缓解不能消除、考核指标诱导过量投放）",
+        "文中数字必须保持'未核实/示意性'标注，不得升格为已核实数据"
+      ],
+      "prohibited_overclaims": [
+        "不得将 47 万辆、62%、55%、18%、22% 等示意数字作为已核实事实引用",
+        "不得为任何数字伪造来源或引用"
+      ]
+    },
+    {
+      "id": "project_case_01",
+      "path": "tests/fixtures/card-baseline/project_case_01.md",
+      "material_kind": "narrated_project_case",
+      "synthetic": true,
+      "topic_group": "case_family_conversion_chain",
+      "expected_speaker_markers": ["青梧书店", "SYNTHETIC"],
+      "expected_units": [
+        "项目背景（活动与图书销售脱节）",
+        "至少一条具体行动（活动-书目绑定 / 48小时回访 / 主讲人共创）",
+        "结果陈述且数字标注未核实",
+        "可分离的复用机制（三段转化链：现场体验→具象清单→低成本回访）",
+        "适用性/局限（主题泛化活动失效、无对照组、推荐语质量不可控）"
+      ],
+      "prohibited_overclaims": [
+        "不得将转化率 4%→11%、点击率 22% 等数字作为已验证结论",
+        "不得声称青梧书店真实存在"
+      ]
+    },
+    {
+      "id": "project_case_01_followup",
+      "path": "tests/fixtures/card-baseline/project_case_01_followup.md",
+      "material_kind": "followup_observation",
+      "synthetic": true,
+      "topic_group": "case_family_conversion_chain",
+      "expected_speaker_markers": ["SYNTHETIC", "财务顾问"],
+      "expected_units": [
+        "测量窗口差异（当晚 3 小时口径 vs 活动 30 天口径 vs 日常口径）",
+        "分母差异（打开消息者 vs 全部报名者）",
+        "归因限制（动线改造叠加，无法单独归因）",
+        "可识别的解释分歧：店主（当场口径才体现机制）vs 财务顾问（当晚口径夸大效应），双方同意现有台账无法裁决"
+      ],
+      "prohibited_overclaims": [
+        "不得将 6.5%、5%、9% 等示意数字作为已核实事实",
+        "不得把任一方解读升格为已裁决结论"
+      ]
+    },
+    {
+      "id": "project_case_01_counterexample",
+      "path": "tests/fixtures/card-baseline/project_case_01_counterexample.md",
+      "material_kind": "counterexample_application",
+      "synthetic": true,
+      "topic_group": "case_family_conversion_chain",
+      "expected_speaker_markers": ["SYNTHETIC", "拾光读书会"],
+      "expected_units": [
+        "失败尝试的具体行动（照搬链条后两段：书单 + 48 小时群消息）",
+        "示意性结果（点击率约 3%、转化近零、成员抱怨与志愿者退出）",
+        "条件差异（免费替代品可得、信任语境冲突、回访渠道弱）",
+        "边界：仅否定'照搬后两段且无销售语境'的组合，未检验线下课程等场景，不得概括为机制普遍失效"
+      ],
+      "prohibited_overclaims": [
+        "不得将 3% 点击率作为已核实事实",
+        "不得断言三段转化链在所有非商业场景无效"
+      ]
+    },
+    {
+      "id": "neg_empty",
+      "path": "tests/fixtures/card-baseline/neg_empty.md",
+      "material_kind": "negative_empty",
+      "synthetic": true,
+      "expected_speaker_markers": [],
+      "expected_units": [],
+      "prohibited_overclaims": ["不得从空文件提炼出任何卡片"]
+    },
+    {
+      "id": "neg_irrelevant",
+      "path": "tests/fixtures/card-baseline/neg_irrelevant.md",
+      "material_kind": "negative_irrelevant",
+      "synthetic": true,
+      "expected_speaker_markers": [],
+      "expected_units": [],
+      "prohibited_overclaims": ["不得将日常闲聊内容提炼为知识卡片"]
+    },
+    {
+      "id": "neg_damaged",
+      "path": "tests/fixtures/card-baseline/neg_damaged.md",
+      "material_kind": "negative_damaged",
+      "synthetic": true,
+      "expected_speaker_markers": [],
+      "expected_units": [],
+      "prohibited_overclaims": ["不得对损坏文本强行解读出完整卡片"]
+    },
+    {
+      "id": "neg_repeated_quote",
+      "path": "tests/fixtures/card-baseline/neg_repeated_quote.md",
+      "material_kind": "negative_repeated_quote",
+      "synthetic": true,
+      "expected_speaker_markers": ["重复粘贴"],
+      "expected_units": ["独立信息单元至多一条（潮汐淤积定义），不得按篇幅折算成多条"],
+      "prohibited_overclaims": ["不得因文本重复而夸大素材价值或虚构单元数量"]
+    }
+  ],
+  "topic_groups": [
+    {
+      "id": "case_family_conversion_chain",
+      "explicit_question": "三段转化链（现场体验→具象清单→低成本回访）在什么条件下有效、在什么条件下失效？",
+      "source_ids": ["project_case_01", "project_case_01_followup", "project_case_01_counterexample"],
+      "supported_tensions": [
+        "结果量级之争：店主（当晚口径是机制的直接体现）vs 财务顾问（当晚口径夸大效应）——这是同一测量对象上可识别的解释分歧，双方均承认台账无法裁决",
+        "有效性范围之争：原案例支持'体验-商品可关联时有效'，反例显示'免费替代品可得+信任语境冲突'时失效"
+      ],
+      "contextual_differences_not_conflicts": [
+        "反例的读书会与原案例书店在销售环节、主讲人身份、回访渠道上条件不同——这些是语境差异，不得记为事实冲突",
+        "测量窗口与分母差异（当晚 vs 30 天、打开者 vs 报名者）是口径差异，不是数据互相矛盾"
+      ],
+      "missing_evidence": [
+        "缺乏错峰或对照条件下的效果记录，无法裁决量级分歧",
+        "线下课程等非销售但可关联场景未覆盖",
+        "回访点击与最终购买的链路数据缺失"
+      ]
+    }
+  ],
+  "preserved_external_fixture": "examples/mini-vault/raw/industry_report.md（既有损坏素材，本任务不修改）"
+}

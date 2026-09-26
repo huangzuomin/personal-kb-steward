@@ -8,6 +8,11 @@
       "match_any": ["检查", "健康", "体检", "lint", "health", "断链", "重复", "过期", "腐烂", "质量", "风险"]
     },
     {
+      "entry": "case_bank",
+      "primary_skill": "case-story-bank-builder",
+      "match_any": ["生成案例卡", "案例卡", "生成案例", "案例库", "案例生成", "case bank", "case story"]
+    },
+    {
       "entry": "weave_work_memory",
       "primary_skill": "work-memory-weave",
       "match_any": ["工作记忆", "沉淀工作", "会议", "周报", "项目", "复盘", "决定", "决策", "待办", "时间线", "decision", "timeline", "review"]

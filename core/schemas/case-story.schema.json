@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "case-story.schema.json",
+  "title": "Canonical case-story contract (M2, evidence-qualified generation)",
+  "type": "object",
+  "required": [
+    "title", "type", "status", "stage", "sources", "summary",
+    "confidence", "review_required", "schema_version", "analysis_mode",
+    "card_level", "context", "action", "result", "reusable_mechanism",
+    "mechanism_inference", "applicability", "provenance_map", "claims"
+  ],
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "anyOf": [
+        {"properties": {"status": {"const": "growing"}, "stage": {"const": "draft"}}, "required": ["status", "stage"]},
+        {"properties": {"status": {"const": "manual_review"}, "stage": {"const": "needs_context"}}, "required": ["status", "stage"]}
+      ]
+    }
+  ],
+  "properties": {
+    "title": {"type": "string", "minLength": 1},
+    "type": {"const": "case-story"},
+    "status": {"enum": ["growing", "manual_review"]},
+    "stage": {"enum": ["draft", "needs_context"]},
+    "sources": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1
+    },
+    "summary": {"type": "string"},
+    "confidence": {"enum": ["high", "medium", "low"]},
+    "review_required": {"type": "boolean"},
+    "schema_version": {"type": "string", "minLength": 1},
+    "generator_version": {"type": ["string", "null"]},
+    "analysis_mode": {"enum": ["llm", "heuristic", "heuristic-fallback", "unknown"]},
+    "source_hashes": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "coverage": {
+      "type": ["string", "null"],
+      "enum": ["full", "partial", "unknown", null]
+    },
+    "related": {"type": "array", "items": {"type": "string"}},
+    "pending_links": {"type": "array", "items": {"type": "string"}},
+    "manual_review": {"type": "array", "items": {"type": "string"}},
+    "quality_flags": {"type": "array", "items": {"type": "string"}},
+    "card_level": {"enum": ["project", "mechanism"]},
+    "context": {"type": "string", "minLength": 1},
+    "action": {"type": "string"},
+    "result": {
+      "type": "object",
+      "required": ["summary", "source_asserted", "figures"],
+      "properties": {
+        "summary": {"type": "string"},
+        "source_asserted": {"const": true},
+        "figures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["statement", "claim_ids"],
+            "properties": {
+              "statement": {"type": "string", "minLength": 1},
+              "claim_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "reusable_mechanism": {"type": "string"},
+    "reusable_mechanism_claim_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "mechanism_inference": {"type": "string"},
+    "mechanism_inference_claim_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "applicability": {
+      "type": "object",
+      "required": ["conditions", "uncertainties"],
+      "properties": {
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["statement", "claim_ids"],
+            "properties": {
+              "statement": {"type": "string", "minLength": 1},
+              "claim_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+            },
+            "additionalProperties": false
+          }
+        },
+        "uncertainties": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "provenance_map": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rel", "provenance", "limitations"],
+        "properties": {
+          "rel": {"type": "string", "minLength": 1},
+          "source_sha256": {"type": "string"},
+          "provenance": {"type": "string"},
+          "source_kind": {"type": "string"},
+          "limitations": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "shared_provenance": {"type": "array", "items": {"type": "string"}},
+    "claims": {
+      "type": "array",
+      "items": {"type": "object"},
+      "minItems": 0
+    }
+  }
+}

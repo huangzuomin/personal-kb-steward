@@ -11,4 +11,14 @@ tags: {{ tags | tojson }}
 confidence: {{ confidence }}
 review_required: {{ review_required | lower }}
 origin: {{ origin | tojson }}
+{% if schema_version is defined and schema_version %}
+schema_version: {{ schema_version }}
+generator_version: {{ generator_version }}
+analysis_mode: {{ analysis_mode }}
+coverage: {{ coverage }}
+source_hashes: {{ source_hashes | tojson }}
+{% endif %}
+{% if quality_flags is defined and quality_flags is not none %}
+quality_flags: {{ quality_flags | tojson }}
+{% endif %}
 ---

@@ -17,6 +17,15 @@ def render_preview(item: dict[str, Any]) -> str:
         f"related: {json.dumps(item.get('related', []), ensure_ascii=False)}",
         f"confidence: {item.get('confidence', 'low')}",
         f"review_required: {str(bool(item.get('review_required', True))).lower()}",
+        f"origin: {json.dumps(item.get('origin', {'source_paths': sources}), ensure_ascii=False)}",
+    ]
+    # Managed cards carry program-owned contract metadata and quality flags;
+    # preserve them into the preview frontmatter instead of dropping them.
+    for key in ("schema_version", "generator_version", "analysis_mode", "coverage",
+                "source_hashes", "quality_flags"):
+        if key in item:
+            lines.append(f"{key}: {json.dumps(item[key], ensure_ascii=False)}")
+    lines.extend([
         "---",
         "",
         f"# {title}",
@@ -27,7 +36,7 @@ def render_preview(item: dict[str, Any]) -> str:
         "",
         "## Sources",
         "",
-    ]
+    ])
     lines.extend(f"- {source}" for source in sources)
     lines.extend(["", "## Pending Links", ""])
     pending = item.get("pending_links", [])

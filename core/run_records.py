@@ -94,6 +94,24 @@ def record_failed_attempt(cfg: dict[str, Any], run_id: str, plan_path: Path | No
               "backup_dir": str(backup_root(cfg) / run_id),
               "operation_log": str(operation_log_path(cfg)), "recovery_hint": recovery_hint(cfg, run_id),
               "next_step": user_next_step(exc), "status": "failed", "phase": cfg.get("_phase", "loading_plan"), "error": str(exc)}
+    if plan_path is not None and plan_path.is_file():
+        try:
+            failed["plan_sha256"] = sha256_file(plan_path)
+        except OSError:
+            pass
+    linkage = cfg.get("_subset_context")
+    if isinstance(linkage, dict):
+        for key in (
+            "parent_run_id",
+            "parent_plan_path",
+            "parent_plan_sha256",
+            "subset_hash",
+            "selected_targets",
+            "selected_review_ids",
+            "queue_snapshot_sha256",
+        ):
+            if key in linkage:
+                failed[key] = linkage[key]
     path = save_run_manifest(cfg, failed)
     # An unavailable operation log must not prevent persisting the failure facts.
     try:

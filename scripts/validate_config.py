@@ -13,6 +13,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from core.layout import validate_options
+from core.config import CARD_PIPELINE_MODES, SEED_GENERATION_MODES
+from core.llm_retry import retry_policy
+from core.initialization_policy import (
+    InitializationPipelineError,
+    load_initialization_pipeline,
+    validate_initialization_config,
+)
 CONFIG_PATH = ROOT / "config.json"
 ROUTER_PATH = ROOT / "router.json"
 WORKFLOWS_PATH = ROOT / "workflows.json"
@@ -60,12 +67,104 @@ def path_expr(cfg: dict, dotted_key: str, default: str = "") -> str:
     return str(current)
 
 
+def seed_generation_errors(cfg: dict) -> list[str]:
+    """seed_generation.mode must be atomic|topic; default only when absent.
+    Present invalid types/values are rejected, never coerced. M0 ships the
+    configuration seam only, not the atomic generator itself."""
+    if "seed_generation" not in cfg:
+        return []
+    section = cfg.get("seed_generation")
+    if not isinstance(section, dict):
+        return ["seed_generation 必须是对象"]
+    if "mode" not in section:
+        return []
+    mode = section["mode"]
+    if not isinstance(mode, str) or mode not in SEED_GENERATION_MODES:
+        return [f"seed_generation.mode 只能是 atomic 或 topic，当前为：{mode!r}"]
+    return []
+
+
+def card_pipeline_errors(cfg: dict) -> list[str]:
+    """card_pipeline.mode must be typed|legacy (default only when absent);
+    topic_questions must be a bounded nonempty-string list (default empty:
+    no configured question => topic stage is disabled, never auto-answered
+    from hints); caps must be positive integers. Present invalid types/values
+    are rejected, never coerced."""
+    if "card_pipeline" not in cfg:
+        return []
+    section = cfg.get("card_pipeline")
+    if not isinstance(section, dict):
+        return ["card_pipeline 必须是对象"]
+    errors: list[str] = []
+    if "mode" in section:
+        mode = section["mode"]
+        if not isinstance(mode, str) or mode not in CARD_PIPELINE_MODES:
+            errors.append(f"card_pipeline.mode 只能是 typed 或 legacy，当前为：{mode!r}")
+    if "topic_questions" in section:
+        questions = section["topic_questions"]
+        if not isinstance(questions, list) or not all(
+                isinstance(q, str) and q.strip() for q in questions):
+            errors.append("card_pipeline.topic_questions 必须是非空字符串列表")
+        elif len(questions) > 1:
+            errors.append("card_pipeline.topic_questions 本轮最多支持一个问题；多问题配置必须拆分为多次运行")
+    for key in ("related_paths_cap", "topic_source_cap"):
+        if key in section:
+            value = section[key]
+            if type(value) is not int or value < 1:
+                errors.append(f"card_pipeline.{key} 必须是正整数：{value!r}")
+    return errors
+
+
+def topic_generation_errors(cfg: dict) -> list[str]:
+    """Validate topic budgets and reject an impossible source floor/cap pair."""
+    if "topic_generation" not in cfg:
+        return []
+    section = cfg.get("topic_generation")
+    if not isinstance(section, dict):
+        return ["topic_generation 必须是对象"]
+    errors: list[str] = []
+    values: dict[str, int] = {}
+    for key, default in (("min_full_sources", 3),
+                         ("max_source_chars", 20000),
+                         ("max_context_chars", 60000)):
+        value = section.get(key, default)
+        if type(value) is not int or value < 1:
+            errors.append(f"topic_generation.{key} 必须是正整数：{value!r}")
+        else:
+            values[key] = value
+    card = cfg.get("card_pipeline")
+    card = card if isinstance(card, dict) else {}
+    cap = card.get("topic_source_cap", 6)
+    if type(cap) is int and cap >= 1 and "min_full_sources" in values \
+            and values["min_full_sources"] > cap:
+        errors.append(
+            "topic_generation.min_full_sources 不能大于 "
+            f"card_pipeline.topic_source_cap（{values['min_full_sources']} > {cap}）"
+        )
+    return errors
+
+
 def main() -> int:
     cfg = read_json(CONFIG_PATH)
     router = read_json(ROUTER_PATH)
     workflows = read_json(WORKFLOWS_PATH)
 
     errors: list[str] = validate_options(cfg)
+    errors.extend(seed_generation_errors(cfg))
+    errors.extend(card_pipeline_errors(cfg))
+    errors.extend(topic_generation_errors(cfg))
+    try:
+        validate_initialization_config(cfg)
+    except InitializationPipelineError as exc:
+        errors.append(str(exc))
+    try:
+        load_initialization_pipeline(lambda entry: workflows.get("entries", {}).get(entry, {}))
+    except InitializationPipelineError as exc:
+        errors.append(str(exc))
+    try:
+        retry_policy(cfg.get("llm", {}))
+    except ValueError as exc:
+        errors.append(f"llm 重试配置无效：{exc}")
     kb_expr = cfg.get("knowledge_base", "")
     if not kb_expr:
         errors.append("knowledge_base 缺失")

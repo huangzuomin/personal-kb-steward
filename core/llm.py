@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import http.client
 import json
+import math
 import os
+import socket
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 from .content_safety import assert_safe_content, sensitive_reason
+from .llm_retry import is_transient_error, retry_policy
 
 
 def _load_env() -> None:
@@ -69,6 +74,10 @@ def call_chat_completion(cfg: dict[str, Any], system_prompt: str, user_payload: 
     assert_safe_content(system_prompt)
     assert_safe_content(user_payload)
     llm_cfg = cfg.get("llm", {})
+    try:
+        policy = retry_policy(llm_cfg)
+    except ValueError as exc:
+        raise LLMError(f"Invalid LLM retry configuration: {exc}") from None
     base_url = os.environ.get("OPENAI_BASE_URL") or llm_cfg.get("base_url") or "https://api.openai.com/v1"
     model = os.environ.get("OPENAI_MODEL") or os.environ.get("LLM_MODEL") or llm_cfg.get("model")
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -79,6 +88,16 @@ def call_chat_completion(cfg: dict[str, Any], system_prompt: str, user_payload: 
         raise LLMError("Missing LLM model. Set OPENAI_MODEL (legacy LLM_MODEL is also accepted) or llm.model.")
     if not api_key:
         raise LLMError("Missing API key. Set OPENAI_API_KEY or llm.api_key_env.")
+
+    try:
+        timeout_value = llm_cfg.get("timeout_seconds", 300)
+        if isinstance(timeout_value, bool) or not isinstance(timeout_value, (int, float)):
+            raise ValueError("timeout_seconds must be a finite number")
+        timeout_seconds = float(timeout_value)
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be greater than zero")
+    except ValueError as exc:
+        raise LLMError(f"Invalid LLM retry/timeout configuration: {exc}") from exc
 
     body = {
         "model": model,
@@ -98,16 +117,111 @@ def call_chat_completion(cfg: dict[str, Any], system_prompt: str, user_payload: 
         },
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=int(llm_cfg.get("timeout_seconds", 300))) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        if sensitive_reason(detail) or api_key in detail:
-            detail = "[provider error body omitted: sensitive content]"
-        raise LLMError(f"LLM HTTP error {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise LLMError(f"LLM connection error: {exc}") from exc
-    content = payload["choices"][0]["message"]["content"]
+    started = time.monotonic()
+    deadline = started + policy.retry_budget_seconds
+
+    for attempt in range(1, policy.max_attempts + 1):
+        # Preserve the configured socket timeout for the first attempt when
+        # the budget permits it. Later attempts use the remaining budget.
+        remaining = (
+            policy.retry_budget_seconds
+            if attempt == 1 else deadline - time.monotonic()
+        )
+        if remaining <= 0:
+            raise LLMError(
+                f"LLM retry budget exhausted before attempt {attempt} "
+                f"of {policy.max_attempts}"
+            ) from None
+        try:
+            timeout = min(timeout_seconds, remaining)
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                raw_response = response.read()
+            try:
+                payload = json.loads(raw_response.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise LLMError("Invalid LLM response JSON; no retry attempted") from None
+            break
+        except urllib.error.HTTPError as exc:
+            if not is_transient_error(exc):
+                detail = _http_error_detail(exc, api_key)
+                raise LLMError(
+                    f"LLM HTTP error {exc.code} on attempt {attempt}/"
+                    f"{policy.max_attempts}: {detail}"
+                ) from None
+            if attempt >= policy.max_attempts:
+                detail = _http_error_detail(exc, api_key)
+                raise LLMError(
+                    f"LLM HTTP error {exc.code} after {attempt} attempts: {detail}"
+                ) from None
+            _close_http_error(exc)
+        except (urllib.error.URLError, OSError,
+                http.client.IncompleteRead, socket.timeout) as exc:
+            if not is_transient_error(exc):
+                detail = _connection_error_detail(exc, api_key)
+                raise LLMError(
+                    f"LLM connection error on attempt {attempt}/"
+                    f"{policy.max_attempts}: {detail}"
+                ) from None
+            if attempt >= policy.max_attempts:
+                detail = _connection_error_detail(exc, api_key)
+                raise LLMError(
+                    f"LLM connection error after {attempt} attempts: {detail}"
+                ) from None
+
+        remaining = deadline - time.monotonic()
+        delay = policy.delay_seconds()
+        if remaining <= delay:
+            raise LLMError(
+                f"LLM retry budget exhausted after {attempt} attempts "
+                f"(budget {policy.retry_budget_seconds:g}s)"
+            ) from None
+        if delay:
+            time.sleep(delay)
+    else:  # pragma: no cover - the loop either returns or raises above
+        raise LLMError(f"LLM provider failed after {policy.max_attempts} attempts") from None
+
+    content = _response_content(payload)
     assert_safe_content(content)
     return content
+
+
+def _response_content(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        raise LLMError("Invalid LLM response shape: expected an object")
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise LLMError("Invalid LLM response shape: missing choices")
+    message = choices[0].get("message")
+    if not isinstance(message, dict) or "content" not in message:
+        raise LLMError("Invalid LLM response shape: missing message content")
+    content = message["content"]
+    if not isinstance(content, str):
+        raise LLMError("Invalid LLM response shape: content must be text")
+    return content
+
+
+def _close_http_error(exc: urllib.error.HTTPError) -> None:
+    try:
+        exc.close()
+    except Exception:
+        pass
+
+
+def _http_error_detail(exc: urllib.error.HTTPError, api_key: str) -> str:
+    try:
+        detail = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        detail = ""
+    finally:
+        _close_http_error(exc)
+    if sensitive_reason(detail) or (api_key and api_key in detail):
+        return "[provider error body omitted: sensitive content]"
+    return detail
+
+
+def _connection_error_detail(exc: BaseException, api_key: str) -> str:
+    reason = getattr(exc, "reason", exc)
+    detail = str(reason)
+    if sensitive_reason(detail) or (api_key and api_key in detail):
+        return "[provider connection detail omitted: sensitive content]"
+    return detail or type(reason).__name__

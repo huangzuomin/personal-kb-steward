@@ -160,6 +160,10 @@ class RecoveryReviewTests(TestCase):
     def test_actual_finalizer_captures_base_before_first_save(self):
         for name in ("a", "b"):
             self.case.install_note(f"wiki/sources/{name}.md", self.case.content("## 关键事实\n- A measured fact.", new_object_id()).replace("topic-page", "source-note"))
+        # This regression targets the historical marker-rule aggregator.  The
+        # default finalizer is typed now, so opt into the old producer locally
+        # rather than treating a typed no-plan as a recovery failure.
+        self.cfg["card_pipeline"] = {"mode": "legacy"}
         plan = steward.make_finalize_plan(self.cfg, plan_run_id="finalizer-base", stamp="2026-09-19")
         updates = [p for p in plan["planned_pages"] if p["operation"] == "update"]
         self.assertTrue(updates)

@@ -11,25 +11,68 @@ from .config import sha256_file, sha256_text
 from .dependencies import stale
 from .derived_index import DerivedIndexError, INTERNAL_DIRS, _info, _open, _path, search
 from .knowledge_objects import ObjectIdentityError
-from .layout import knowledge_dirs, knowledge_prefixes
+from .layout import knowledge_dirs, knowledge_prefixes, relative_dir
 from .vault import Note, VaultIndex
 
 DEFAULT_PREFIXES = ("raw/", "quicknote/", "inbox/", "wiki/seeds/", "wiki/topics/", "wiki/sources/",
                     "wiki/evidence/", "wiki/gaps/", "wiki/claim-checks/")
 
-INPUT_DIRS = ("raw", "quicknote", "inbox")
+DEFAULT_INPUT_DIRS = ("raw", "quicknote", "inbox")
+
+# The recall scope's input directories.  Deliberately NOT ``layout.INPUT_DIRS``:
+# that one is a *safety* set (directories knowledge output must never overlap),
+# and widening the recall scope must never widen the write guard.  The two happen
+# to hold the same three values today, which is exactly what makes them easy to
+# conflate -- so they stay separate on purpose.
+INPUT_DIRS = DEFAULT_INPUT_DIRS  # kept for callers that referenced the old name
+
+
+def retrieval_input_dirs(cfg: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """Configured recall-scope input directories; the historical three by default.
+
+    A vault may keep its notes under top-level topic directories that the
+    historical three never covered, which leaves them permanently unsearchable.
+    Making the scope configurable is the fix; which directories to add is a
+    product decision, so the default here stays exactly what it was.
+
+    Invalid entries raise instead of silently widening or narrowing the scope.
+    An explicit empty list is honoured as "knowledge objects only".
+    """
+    configured = ((cfg or {}).get("scan") or {}).get("retrieval_include_dirs")
+    if configured is None:
+        return DEFAULT_INPUT_DIRS
+    if not isinstance(configured, (list, tuple)):
+        raise ValueError("scan.retrieval_include_dirs must be a list of vault-relative directories")
+    dirs: list[str] = []
+    for value in configured:
+        text = relative_dir(value)
+        if text not in dirs:
+            dirs.append(text)
+    return tuple(dirs)
 
 
 def retrieval_prefixes(cfg: dict[str, Any] | None = None,
                        knowledge: tuple[str, ...] | None = None) -> tuple[str, ...]:
-    """Default recall scope: raw inputs first, then knowledge objects."""
-    return tuple(f"{d}/" for d in INPUT_DIRS) + (knowledge if knowledge is not None else knowledge_prefixes(cfg))
+    """Default recall scope: configured input dirs first, then knowledge objects."""
+    return tuple(f"{d}/" for d in retrieval_input_dirs(cfg)) + (knowledge if knowledge is not None else knowledge_prefixes(cfg))
 
 
 def knowledge_prefixes_with_inputs(cfg: dict[str, Any] | None = None,
                                    knowledge: tuple[str, ...] | None = None) -> tuple[str, ...]:
-    """Knowledge objects first, `raw/` last: for cross-source synthesis tasks."""
-    return (knowledge if knowledge is not None else knowledge_prefixes(cfg)) + ("raw/",)
+    """Knowledge objects first, then the recall-scope input dirs: cross-source synthesis.
+
+    The writing entry used to hardcode ``raw/`` as its only input directory, which
+    left every vault that keeps its material under top-level topic directories
+    invisible to it -- and no amount of ``scan.retrieval_include_dirs``
+    configuration could reach them, because this path never read the setting.
+    It now honours the same configurable scope as :func:`retrieval_prefixes`.
+
+    The *unconfigured* default stays exactly ``raw/`` so existing vaults see no
+    change; only a vault that opts into an explicit scope gets the wider one.
+    """
+    scope = ((cfg or {}).get("scan") or {}).get("retrieval_include_dirs")
+    inputs = ("raw/",) if scope is None else tuple(f"{d}/" for d in retrieval_input_dirs(cfg))
+    return (knowledge if knowledge is not None else knowledge_prefixes(cfg)) + inputs
 
 
 # --- Page predicates ------------------------------------------------------
@@ -72,18 +115,52 @@ def fallback_terms(query: str) -> list[str]:
     return [q.lower() for q in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}|[\u4e00-\u9fff]{2,12}", query)]
 
 
+CJK_RUN = re.compile(r"[\u4e00-\u9fff]+")
+CJK_WINDOW = 3
+TERM_BUDGET = 16
+
+
 def query_terms(query: str) -> list[str]:
     clean = BOILERPLATE.sub(" ", query)
     words = re.findall(r"[A-Za-z][A-Za-z0-9_+-]*|[\u4e00-\u9fff]+", clean)
-    terms = [t.lower() for t in words]
-    unique = list(dict.fromkeys(t for t in terms if t not in STOPWORDS))[:16]
-    if unique:
-        return unique
+    groups: list[list[str]] = []
+    for word in words:
+        # A whole run of Chinese used to become a single term.  The index side
+        # tokenises with FTS5's trigram tokenizer and the scoring side does a
+        # literal substring test, so one long term demanded that the *entire*
+        # phrase appear verbatim -- which made realistic Chinese queries match
+        # nothing at all.  Slice long runs into 3-character windows, the same
+        # width the index uses.  Each window is searched independently and the
+        # hits are unioned downstream, so this reads as "some fragment appears"
+        # rather than "the whole phrase appears".  Runs of <= 3 characters are
+        # kept whole: they are already one trigram, or fall to the short-substring
+        # scan, and splitting them would only add noise.
+        if len(word) > CJK_WINDOW and CJK_RUN.fullmatch(word):
+            groups.append([word[i:i + CJK_WINDOW] for i in range(len(word) - CJK_WINDOW + 1)])
+        else:
+            groups.append([word.lower()])
+    # Round-robin across the query's own words before truncating.  Taking a
+    # prefix instead spends the whole budget on the first clause, so every later
+    # clause of a multi-part Chinese query would go unsearched -- the exact
+    # failure this function is being fixed for, one level down.
+    picked: list[str] = []
+    seen: set[str] = set()
+    for offset in range(max((len(group) for group in groups), default=0)):
+        for group in groups:
+            if offset >= len(group) or len(picked) >= TERM_BUDGET:
+                continue
+            term = group[offset]
+            if term in STOPWORDS or term in seen:
+                continue
+            seen.add(term)
+            picked.append(term)
+    if picked:
+        return picked
     # No extractable term (empty query, or boilerplate only). The old fallback
     # was a hardcoded demo vocabulary ("ai 新闻 媒体 温州 知识"), which made every
     # vault search as though it were the upstream demo corpus. Fall back to the
     # query's own words instead, so the behaviour stays vault-neutral.
-    return list(dict.fromkeys(terms))[:16]
+    return list(dict.fromkeys(t for group in groups for t in group))[:TERM_BUDGET]
 
 
 def excerpt(note: Note, terms: list[str], limit: int) -> str:
@@ -136,18 +213,30 @@ class Retriever:
             self.incoming.clear()
 
     def select(self, query: str, *, limit: int = 12, prefixes: tuple[str, ...] | None = None,
-               note_type: str | None = None, note_status: str | None = None) -> Selection:
+               note_type: str | None = None, note_status: str | None = None,
+               scope_to_index: bool = False,
+               exclude_paths: set[str] | None = None) -> Selection:
+        """Select current notes, optionally keeping the request index as the full candidate scope.
+
+        The normal path uses the derived index for bounded recall and only adds
+        changed/new live notes.  A caller that constructed ``self.index`` as a
+        deliberate request scope can set ``scope_to_index`` so cache recall
+        ranks remain diagnostic hints without allowing unrelated full-vault hits
+        to evict every note in that scope before live matching.
+        """
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("检索 limit 必须为 1 至 100")
         # None means "use the configured layout"; callers that pass an explicit
         # tuple still get exactly that scope.
         if prefixes is None:
             prefixes = retrieval_prefixes(self.cfg)
+        excluded = {str(path) for path in (exclude_paths or set())}
         self._load()
         terms = query_terms(query)
         eligible = {}
         for note in self.index.by_rel.values():
-            if (not note.rel.startswith(prefixes) or set(note.path.relative_to(self.index.root).parts) & INTERNAL_DIRS
+            if (note.rel in excluded or not note.rel.startswith(prefixes)
+                    or set(note.path.relative_to(self.index.root).parts) & INTERNAL_DIRS
                     or note_type is not None and note.metadata.get("type") != note_type
                     or note_status is not None and note.metadata.get("status") != note_status):
                 continue
@@ -174,7 +263,7 @@ class Retriever:
                 ranks.clear()
                 engine = "live-scan"
         # Newly created/edited notes are not invisible just because rebuild is explicit.
-        candidates = eligible if self.fallback else {
+        candidates = eligible if self.fallback or scope_to_index or excluded else {
             path: note for path, note in eligible.items()
             if path in ranks or self.cached.get(path) != note.sha256}
         scored = []
@@ -204,6 +293,10 @@ class Retriever:
                   "fallback_reason": self.fallback, "notice": NOTICE, "hits": hits,
                   "requires_review": require_review, "warnings": self.info.get("warnings", []),
                   "index_engines": sorted(index_engines)}
+        if scope_to_index:
+            report["scope_to_index"] = True
+        if excluded:
+            report["excluded_paths"] = sorted(excluded)
         self.history.append(report)
         self.hits.update({h["path"]: h for h in hits})
         self.terms = terms
