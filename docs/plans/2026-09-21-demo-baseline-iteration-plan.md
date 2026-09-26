@@ -1,7 +1,7 @@
 # personal-kb-steward：以 demo 为最低基线的迭代计划
 
-日期：2026-09-21  
-状态：工程验收通过，内容收尾。最新完整回归 986 项通过、9 项平台权限跳过；一轮真实公开生成经审核写入 15 张五类卡片。Astra 内容评审为 revise：只剩种子标题/弱关联、主题来源范围两包收敛任务，详见 `../iteration-evidence/astra-public-live-content-review.md`。Claude CLI 已恢复；Astra 继续负责规划、调度和独立验收。存量卡修复、可选 demo v2 和新架构不进入收尾。  
+日期：2026-09-21
+状态：工程验收通过，内容收尾。最新完整回归 986 项通过、9 项平台权限跳过；一轮真实公开生成经审核写入 15 张五类卡片。Astra 内容评审为 revise：只剩种子标题/弱关联、主题来源范围两包收敛任务，详见 `../iteration-evidence/astra-public-live-content-review.md`。Claude CLI 已恢复；Astra 继续负责规划、调度和独立验收。存量卡修复、可选 demo v2 和新架构不进入收尾。
 核对基线：`4d95bc8a56aec52e088b229d5fc5f872d1be121c`。后续实现若基线前进，检查相关差异并调整任务，不重复实施已合并修复。
 
 ## 1. 已确认的范围与取舍
