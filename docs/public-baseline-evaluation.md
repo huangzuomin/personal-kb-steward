@@ -24,6 +24,13 @@ explicit five-call checkpoint (source ×4 and seed ×1); it does not claim a
 full baseline. The runner enforces the adapter hard bounds of 10 calls per
 round and 30 calls total, including failed or timed-out attempts.
 
+`--excerpt-budget N` overrides `scan.max_source_chars` (the per-document
+excerpt cap applied when the pipeline builds generator documents) and is
+recorded in the report. Note it only binds when a canonical fixture exceeds
+the cap: every current card-baseline source fixture is under 3 KB, so any
+budget at or above ~3 KB is non-binding and an A/B comparison across such
+budgets measures nothing.
+
 The artifact root must not already exist and contains a marked synthetic
 vault. Output counts come only from normal applied run manifests whose
 reconcile result, content hash, typed frontmatter, object identity, revision,
