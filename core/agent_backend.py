@@ -105,17 +105,15 @@ def _build_argv(agent: dict[str, Any], workspace: str, prompt_file: Path) -> tup
     return argv, stdin_mode
 
 
-def run_llm_probe(cfg: dict[str, Any], backend: str | None = None) -> tuple[bool, list[str]]:
-    """Connectivity probe behind the CLI ``llm-check`` command. Optionally
-    overrides llm.backend on a config copy (never persists). Returns
-    (ok, output lines to print)."""
+def run_llm_probe(cfg: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Connectivity probe behind the CLI ``llm-check`` command. The active
+    backend is resolved from cfg; per-command overrides (``--backend``) are
+    applied by the CLI via core.config.override_llm_backend before this is
+    called. Returns (ok, output lines to print)."""
     from .config import llm_backend as resolve_backend
     from .json_contract import extract_json
     from .llm import llm_generate
 
-    if backend:
-        cfg = json.loads(json.dumps(cfg, ensure_ascii=False))
-        cfg.setdefault("llm", {})["backend"] = backend
     try:
         active = resolve_backend(cfg)
     except ValueError as exc:
