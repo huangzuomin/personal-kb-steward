@@ -1228,3 +1228,52 @@ _kb-steward/ 文件数           0（从未对真库 --apply）
 
 > ⚠️ `LOCAL-PATCHES.md` 头部写的基线 commit（`65741ae`）与测试数字（`234 passed`）
 > **已过期**，且它有两个「补丁 D」。**以本文档为准。**
+
+---
+
+## 11. 补丁 L —— 混合流水线：LLM 传输后端可插拔（2026-09-26）
+
+> 本补丁未合并上游，是本地独立演进。目标：Python 保留确定性层（扫描/质量门/dry-run/
+> review/apply/审计），LLM 合成层可在「直调 API」与「无头 agent CLI」之间用配置切换。
+
+### 改动总览
+
+| 文件 | 改动 |
+| --- | --- |
+| `core/agent_backend.py` | **新增**。agent 后端：subprocess 调无头 CLI（stdin 传 prompt，args 数组无 shell），prompt 写 `.openclaw/tmp/` 用完即删 |
+| `core/config.py` | 新增 `llm_backend(cfg)`：缺省 `api`；非法值 fail-closed（同 `card_pipeline_mode` 风格） |
+| `core/llm.py` | 新增 `llm_generate(cfg, ...)`：唯一传输接缝，按 backend 分发 |
+| `core/skill_runtime.py` | 调用点换 `llm_generate` |
+| `core/{clustering,reconcile,synthesis,topic_generation,evidence_cards}.py` | 其余直接调用点换 `llm_generate`（`default_provider()` 一并切换，concept/case 经它继承） |
+| `core/card_pipeline.py` | `base_provider` 缺省换 `llm_module.llm_generate` |
+| `scripts/personal_kb_steward.py` | ① documents 注入 `abs_path`（agent 据此 Read 全文，绕过 6000 字符截断；api 后端忽略该字段）② 新增 `llm-check` 子命令 |
+| `router.json` | 补 `compile_research` 入口 → `topic-research-compile`（修 S0 报告 §4.2 路由缺陷）；alias 同步改指新入口 |
+| `workflows.json` | 补 `compile_research` entry |
+| `config.json` / `config.example.json` | `llm` 段增 `backend` + `agent`；真库默认 `agent`，example 默认 `api` |
+| `docs/llm-setup.md` | 重写为双后端配置指南 |
+| `tests/test_agent_backend.py`、`tests/test_llm_backend_config.py` | **新增**（见 §11.3） |
+
+### 兼容性约定
+
+- 无 `llm.backend` 键 = `api`，历史配置零行为变化。
+- `_PatchedLLM`（evaluate_public_baseline）仍有效：`llm_generate` 每次调用经模块全局
+  解析 `call_chat_completion`，patch 该属性即拦截 api 后端全程。
+- `.env` / `OPENAI_*` 环境变量机制不变，仅作用于 api 后端。
+
+### agent 后端安全边界
+
+- CLI 以只读工具白名单运行（claude：`--allowedTools Read Grep Glob`；headless 下未列出的
+  工具一律拒绝），prompt 经 stdin 传入（`{stdin}` 占位符），无 shell=True。
+- agent 唯一产出是 stdout JSON 文本；落盘只走 dry-run → review → apply 链路。
+- `assert_safe_content` 对 prompt 与 stdout 双向扫描，与 api 后端同强度。
+
+### 验收基线（2026-09-26 实测）
+
+- pytest 全量：**1185 passed / 3 failed / 9 skipped**。3 个失败
+  （test_producer_recovery×2、test_seed_quality_outputs×1）经 `git stash`
+  对照确认在**未打补丁的基线上同样失败**（本机 Windows `%TEMP%` 大小写导致的
+  路径比较断言），**新增失败 = 0**；新增测试 24 个（agent_backend×13、
+  llm_backend_config×11）全部通过。
+- `plan --mock-llm` 冒烟：全链路（扫描→路由→mock runtime→计划）ok=True。
+- `llm-check` 真连通：agent 后端（claude CLI，stdin prompt）13.4s 通过；
+  api 后端（GLM-5.3-Flash）6.2s 通过。

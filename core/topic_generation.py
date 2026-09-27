@@ -76,7 +76,7 @@ Key guarantees:
   _split_links. Paths are validated against absolute/traversal/backslash/
   control characters.
 - Exactly ONE bounded provider call (injectable; default
-  core.llm.call_chat_completion), no hidden retries; secret screening pre and
+  core.llm.llm_generate), no hidden retries; secret screening pre and
   post; Jinja preflight before the call; safe_error_message everywhere.
 - Persisted card_state = {"version": 1, "type": "topic-page", "claims": [...],
   "analysis": {...}} is written into the rendered frontmatter and must match
@@ -96,7 +96,7 @@ from .claims import Claim, EvidenceError, compile_claims, render_claims
 from .content_safety import assert_safe_content, safe_error_message
 from .jinja_renderer import render_template
 from .json_contract import extract_json
-from .llm import call_chat_completion
+from .llm import llm_generate
 from . import text_integrity
 
 TOPIC_SCHEMA_VERSION = "topic-1"
@@ -706,7 +706,7 @@ def generate_topic(
         "state": "error", "reason": None, "candidate": None, "page": None,
         "claims": [], "analysis": {}, "issues": [],
     }
-    provider = call_provider or call_chat_completion
+    provider = call_provider or llm_generate
 
     if not isinstance(question, str) or not question.strip():
         result["reason"] = "缺少明确的研究问题"

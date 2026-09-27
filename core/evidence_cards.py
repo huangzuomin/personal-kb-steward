@@ -32,7 +32,7 @@ from .claims import Claim, EvidenceError, compile_claims
 from .content_safety import assert_safe_content, safe_error_message
 from .jinja_renderer import render_template
 from .json_contract import extract_json
-from .llm import call_chat_completion
+from .llm import llm_generate
 from .topic_generation import is_safe_rel_path
 from . import text_integrity
 
@@ -624,4 +624,4 @@ def bounded_call(
 
 
 def default_provider() -> Callable[[dict[str, Any], str, dict[str, Any]], str]:
-    return call_chat_completion
+    return llm_generate

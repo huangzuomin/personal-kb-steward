@@ -2,12 +2,29 @@
   "agent": "personal-kb-steward",
   "agent_name_cn": "个人知识库管家",
   "llm": {
+    "backend": "api",
     "provider": "openai-compatible",
     "base_url": "https://api.openai.com/v1",
     "model": "",
     "api_key_env": "OPENAI_API_KEY",
     "temperature": 0.2,
-    "timeout_seconds": 300
+    "timeout_seconds": 300,
+    "agent": {
+      "command": "claude",
+      "args": [
+        "-p",
+        "--output-format",
+        "text",
+        "--allowedTools",
+        "Read",
+        "--allowedTools",
+        "Grep",
+        "--allowedTools",
+        "Glob",
+        "{stdin}"
+      ],
+      "timeout_seconds": 900
+    }
   },
   "knowledge_base": "${AGENT_HOME}\\kb-template",
   "state_file": "${AGENT_HOME}\\.openclaw\\personal-kb-steward-state.json",

@@ -669,8 +669,10 @@ def _load_steward():
 
 class _PatchedLLM:
     """Route the init stage's default provider through `provider` by patching
-    core.llm.call_chat_completion (skill executor modules re-import it fresh
-    on each execute_skill call). Production code is restored afterwards."""
+    core.llm.call_chat_completion. Every provider call now enters through
+    llm_generate, which resolves call_chat_completion as a module global on
+    each call — so this patch still intercepts the api backend end to end.
+    Production code is restored afterwards."""
 
     def __init__(self, provider: Callable[..., str]) -> None:
         from core import llm as llm_module

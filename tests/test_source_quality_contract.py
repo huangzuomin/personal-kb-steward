@@ -175,7 +175,7 @@ class ExecutorAnalysisTests(unittest.TestCase):
         norm = normalized_text(note["source_text"])
         provider, calls = stub_llm(quote_of=lambda text: pivot if pivot in text else None)
         cfg = {"source_analysis": {"chunk_chars": 4000, "max_chunks": 12}, "write": {}}
-        with patch.object(_SRC_EXEC, "call_chat_completion", provider):
+        with patch.object(_SRC_EXEC, "llm_generate", provider):
             data = _SRC_EXEC.analyze_note(note, cfg, use_llm=True)
         self.assertEqual(data["coverage"], "full")
         self.assertEqual(data["source_hashes"], {note["rel"]: note["source_sha256"]})
@@ -205,7 +205,7 @@ class ExecutorAnalysisTests(unittest.TestCase):
         def fenced_provider(cfg, system_prompt, user_payload):
             return f"```json\n{payload}\n```"
 
-        with patch.object(_SRC_EXEC, "call_chat_completion", fenced_provider):
+        with patch.object(_SRC_EXEC, "llm_generate", fenced_provider):
             data = _SRC_EXEC.analyze_note(note, {"write": {}}, use_llm=True)
         self.assertEqual(data["analysis_mode"], "llm")
         self.assertTrue(any(unit["verified"] and unit["quote"] == quote
@@ -216,7 +216,7 @@ class ExecutorAnalysisTests(unittest.TestCase):
         pivot = "2025年9月，该市试点线路的准点率从71%提升至89%"
         provider, calls = stub_llm(quote_of=lambda text: pivot if pivot in text else None)
         cfg = {"source_analysis": {"chunk_chars": 4000, "max_chunks": 1}, "write": {}}
-        with patch.object(_SRC_EXEC, "call_chat_completion", provider):
+        with patch.object(_SRC_EXEC, "llm_generate", provider):
             data = _SRC_EXEC.analyze_note(note, cfg, use_llm=True)
         self.assertEqual(data["coverage"], "partial")
         self.assertEqual(data["chunk_plan"]["excluded_ranges"][0]["start"], data["chunk_plan"]["read_chars"])
@@ -242,7 +242,7 @@ class ExecutorAnalysisTests(unittest.TestCase):
         def failing(cfg, system_prompt, payload):
             raise RuntimeError("network disabled in tests")
 
-        with patch.object(_SRC_EXEC, "call_chat_completion", failing):
+        with patch.object(_SRC_EXEC, "llm_generate", failing):
             data = _SRC_EXEC.analyze_note(note, {"write": {}}, use_llm=True)
         self.assertEqual(data["analysis_mode"], "heuristic-fallback")
         self.assertTrue(any("LLM 全部分块失败" in flag for flag in data["quality_flags"]))
@@ -251,7 +251,7 @@ class ExecutorAnalysisTests(unittest.TestCase):
         note = fixture_note("long-article.md")
         pivot = "2025年9月，该市试点线路的准点率从71%提升至89%"
         provider, _ = stub_llm(quote_of=lambda text: pivot if pivot in text else None)
-        with patch.object(_SRC_EXEC, "call_chat_completion", provider):
+        with patch.object(_SRC_EXEC, "llm_generate", provider):
             result = _SRC_EXEC.execute({"notes": [note], "config": {"write": {}}, "use_llm": True})
         page, = result["created"]
         self.assertEqual(page["skill"], "topic-research-compile")
@@ -294,7 +294,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
                                "key_statements": [], "topics": [], "limitations": [],
                                "quality_flags": []})
 
-        with patch.object(_SRC_EXEC, "call_chat_completion", provider):
+        with patch.object(_SRC_EXEC, "llm_generate", provider):
             data = _SRC_EXEC.analyze_note(note, self.CFG, use_llm=True)
         self.assertEqual(data["status"], "partial")
         self.assertEqual(data["coverage"], "partial")
@@ -310,7 +310,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
         good = fixture_note("long-article.md")
         pivot = "2025年9月，该市试点线路的准点率从71%提升至89%"
         provider, _ = stub_llm(quote_of=lambda text: pivot if pivot in text else None)
-        with patch.object(_SRC_EXEC, "call_chat_completion", provider):
+        with patch.object(_SRC_EXEC, "llm_generate", provider):
             result = _SRC_EXEC.execute({"notes": [good, fixture_note("empty.md")],
                                         "config": self.CFG, "use_llm": True})
         self.assertEqual(len(result["created"]), 1)
@@ -333,7 +333,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
         def fixed_payload_provider(cfg, system_prompt, user_payload):
             return payload
 
-        with patch.object(_SRC_EXEC, "call_chat_completion", fixed_payload_provider):
+        with patch.object(_SRC_EXEC, "llm_generate", fixed_payload_provider):
             data2 = _SRC_EXEC.analyze_note(note, self.CFG, use_llm=True)
         units = {u["text"]: u for u in data2["info_units"] if u["verified"]}
         self.assertEqual(units["助手建议只留增长率结论。"]["speaker"], "助手")
@@ -362,7 +362,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
         damaged = {"rel": "raw/damaged.md", "title": "损坏样本", "body": "",
                    "summary": "", "metadata": {},
                    "source_error": "'utf-8' codec can't decode byte 0xff"}
-        with patch.object(_SRC_EXEC, "call_chat_completion", provider):
+        with patch.object(_SRC_EXEC, "llm_generate", provider):
             result = _SRC_EXEC.execute({"notes": [fixture_note("empty.md"), damaged],
                                         "config": self.CFG, "use_llm": True})
         self.assertEqual(result["created"], [])
@@ -379,7 +379,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
         note = fixture_note("dialogue.md")
         note["source_sha256"] = "0" * 64
         provider, _ = stub_llm(quote_of=lambda text: None)
-        with patch.object(_SRC_EXEC, "call_chat_completion", provider):
+        with patch.object(_SRC_EXEC, "llm_generate", provider):
             result = _SRC_EXEC.execute({"notes": [note], "config": self.CFG, "use_llm": True})
         self.assertEqual(result["created"], [])
         self.assertTrue(any("不一致" in issue or "不可信" in issue for issue in result["issues"]))
@@ -393,7 +393,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
                                "limitations": [], "quality_flags": []})
 
         from core.content_safety import SensitiveContentError
-        with patch.object(_SRC_EXEC, "call_chat_completion", leaky_provider):
+        with patch.object(_SRC_EXEC, "llm_generate", leaky_provider):
             with self.assertRaises(SensitiveContentError):
                 _SRC_EXEC.execute({"notes": [note], "config": self.CFG, "use_llm": True})
 
@@ -401,7 +401,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
         note = fixture_note("long-article.md")
         pivot = "2025年9月，该市试点线路的准点率从71%提升至89%"
         provider, _ = stub_llm(quote_of=lambda text: pivot if pivot in text else None)
-        with patch.object(_SRC_EXEC, "call_chat_completion", provider):
+        with patch.object(_SRC_EXEC, "llm_generate", provider):
             result = _SRC_EXEC.execute({"notes": [note], "config": self.CFG, "use_llm": True})
         page, = result["created"]
         meta, _ = parse_frontmatter(page["content"])
@@ -450,7 +450,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
 
     def test_invalid_analysis_config_is_bounded_error_not_recursion(self):
         note = fixture_note("dialogue.md")
-        with patch.object(_SRC_EXEC, "call_chat_completion", lambda *a: "{}"):
+        with patch.object(_SRC_EXEC, "llm_generate", lambda *a: "{}"):
             result = _SRC_EXEC.execute({"notes": [note],
                                         "config": {"source_analysis": {"chunk_chars": "bad"},
                                                    "write": {}},
@@ -483,7 +483,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
             cfg["source_analysis"] = self.CFG["source_analysis"]
             index = build_index(cfg)
             notes = [index.by_rel[n] for n in ("raw/long-article.md", "raw/empty.md")]
-            with patch.object(_SRC_EXEC, "call_chat_completion", provider):
+            with patch.object(_SRC_EXEC, "llm_generate", provider):
                 result = _SRC_EXEC.execute({"notes": steward.executor_notes(notes),
                                             "config": cfg, "use_llm": True})
             pages = steward.planned_pages_from_executor_result(cfg, result, "m1-round2")
@@ -504,7 +504,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
                               "key_statements": [{"text": "不可核验陈述", "quote": "原文中根本不存在的句子",
                                                   "kind": "assertion"}],
                               "topics": [], "limitations": [], "quality_flags": []})
-        with patch.object(_SRC_EXEC, "call_chat_completion", lambda *a: payload):
+        with patch.object(_SRC_EXEC, "llm_generate", lambda *a: payload):
             result = _SRC_EXEC.execute({"notes": [note], "config": self.CFG, "use_llm": True})
         self.assertEqual(result["processed"], 0)  # zero usable units never counts as success
         # a diagnostic review card may exist, explicitly marked partial/unusable
@@ -529,7 +529,7 @@ class ReviewRoundTwoTests(unittest.TestCase):
             return payload if pivot in user_payload["text"] else json.dumps(
                 {"summary": "", "key_statements": [], "limitations": [], "quality_flags": []})
 
-        with patch.object(_SRC_EXEC, "call_chat_completion", provider):
+        with patch.object(_SRC_EXEC, "llm_generate", provider):
             result = _SRC_EXEC.execute({"notes": [note], "config": self.CFG, "use_llm": True})
         page, = result["created"]
         self.assertNotIn("[[wiki/topics/伪造", page["content"])

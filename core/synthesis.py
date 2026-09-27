@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from .config import sha256_text
 from .knowledge_objects import ObjectIdentityError
-from .llm import call_chat_completion
+from .llm import llm_generate
 from .reconcile import (SKILL, ReconcileConflict, _patch_header, _read, _resolve,
                         _source_paths, _synthesis_request, make_reconcile_plan)
 from .retrieval import Retriever
@@ -78,7 +78,7 @@ def make_synthesis_plan(cfg: dict[str, Any], question: str, *, topic: str,
             max_chars = int(cfg.get("reconcile", {}).get("max_context_chars", 60000))
             if len(json.dumps(payload, ensure_ascii=False)) > max_chars:
                 raise ReconcileConflict("完整综合上下文超过限制，请缩小检索范围；不静默截断证据")
-            return (completion or call_chat_completion)(model_cfg, prompt + _PROMPT, payload)
+            return (completion or llm_generate)(model_cfg, prompt + _PROMPT, payload)
 
         plan = make_reconcile_plan(cfg, topic, paths, target=rel if existing else None,
                                    plan_run_id=plan_run_id, completion=synthesize,

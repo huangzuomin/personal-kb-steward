@@ -161,7 +161,7 @@ class WorkMemoryEntryTests(unittest.TestCase):
                 captured["paths"] = paths
                 return work_memory_response(paths)
 
-            with patch("core.skill_runtime.call_chat_completion", side_effect=model):
+            with patch("core.skill_runtime.llm_generate", side_effect=model):
                 plan = steward.make_execution_plan(
                     cfg, "整理 Alpha 项目工作记忆", use_llm=True, include_all=True)
 
@@ -259,7 +259,7 @@ class WritingMaterialPackEntryTests(unittest.TestCase):
                 paths = [d["path"] for d in payload["documents"]]
                 return material_pack_response(paths)
 
-            with patch("core.skill_runtime.call_chat_completion", side_effect=model):
+            with patch("core.skill_runtime.llm_generate", side_effect=model):
                 plan = steward.make_execution_plan(
                     cfg, "围绕 Alpha 验收评审 生成材料包", use_llm=True, include_all=True)
 
@@ -307,7 +307,7 @@ class WritingMaterialPackEntryTests(unittest.TestCase):
             def model(_cfg, _prompt, payload):
                 return generic_material_pack_response([d["path"] for d in payload["documents"]])
 
-            with patch("core.skill_runtime.call_chat_completion", side_effect=model):
+            with patch("core.skill_runtime.llm_generate", side_effect=model):
                 plan = steward.make_execution_plan(
                     cfg, "围绕 Alpha 验收评审 生成材料包", use_llm=True, include_all=True)
 
@@ -348,7 +348,7 @@ class WritingMaterialPackEntryTests(unittest.TestCase):
                 "facts": "不是列表", "cases": [], "risks": [], "gaps": [],
                 "not_recommended": [], "confidence": "medium", "review_required": True,
             }]}, ensure_ascii=False)
-            with patch("core.skill_runtime.call_chat_completion", return_value=invalid):
+            with patch("core.skill_runtime.llm_generate", return_value=invalid):
                 plan = steward.make_execution_plan(
                     cfg, "围绕 Alpha 验收评审 生成材料包", use_llm=True, include_all=True)
             self.assertEqual([p for p in plan["planned_pages"]

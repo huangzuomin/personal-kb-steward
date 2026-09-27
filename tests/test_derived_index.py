@@ -47,7 +47,7 @@ def test_real_claims_are_rebuildable_searchable_and_queries_are_readonly(vault, 
     assert data_rows(vault.cfg) == saved
     db_before = cache_path(vault.cfg).read_bytes()
     capsys.readouterr()
-    with patch.object(cli, 'config', return_value=vault.cfg), patch('core.reconcile.call_chat_completion') as model:
+    with patch.object(cli, 'config', return_value=vault.cfg), patch('core.reconcile.llm_generate') as model:
         for args in [['status'], ['show', page['object_id']], ['search', 'measured', '--kind', 'claim']]:
             assert cli.main(args) == 0
         model.assert_not_called()

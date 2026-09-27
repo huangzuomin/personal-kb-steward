@@ -9,7 +9,7 @@ from renderer import render
 from core import atomic_seed, card_relations
 from core.config import seed_generation_mode
 from core.content_safety import SensitiveContentError
-from core.llm import call_chat_completion
+from core.llm import llm_generate
 from core.seed_quality import seed_item, signal_sentences
 
 
@@ -133,10 +133,10 @@ def _execute_atomic(context: dict, cfg: dict) -> dict:
     notes = context.get("notes", [])
     use_llm = bool(context.get("use_llm", False))
     # model_fn lets tests and future integrations inject a provider; production
-    # routing always goes through the screened call_chat_completion entry.
+    # routing always goes through the screened llm_generate entry.
     model_fn = context.get("model_fn") if callable(context.get("model_fn")) else None
     if model_fn is None and use_llm:
-        model_fn = lambda system, payload: call_chat_completion(cfg, system, payload)
+        model_fn = lambda system, payload: llm_generate(cfg, system, payload)
     provider_calls = 0
     if model_fn is not None:
         original_model_fn = model_fn

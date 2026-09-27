@@ -69,7 +69,7 @@ def report_provider(cfg, system_prompt, user_payload):
     return json.dumps(resp, ensure_ascii=False)
 
 
-with patch.object(EXEC, "call_chat_completion", report_provider):
+with patch.object(EXEC, "llm_generate", report_provider):
     report_result = EXEC.execute({"notes": [report], "config": CFG, "use_llm": True})
     report_payload = EXEC.analyze_note(report, CFG, use_llm=True)
 

@@ -97,7 +97,7 @@ def test_unchanged_sources_noop_avoids_model_plan_and_revision(vault):
     first = plan(vault)
     review_apply(vault, first)
     snapshot = {p: p.read_bytes() for p in vault.root.rglob("*") if p.is_file()}
-    with patch.object(cli, "config", return_value=vault.cfg), patch("core.reconcile.call_chat_completion") as model:
+    with patch.object(cli, "config", return_value=vault.cfg), patch("core.reconcile.llm_generate") as model:
         assert cli.main(["Evidence", "--source", "raw/a.md"]) == 0
         model.assert_not_called()
     assert snapshot == {p: p.read_bytes() for p in vault.root.rglob("*") if p.is_file()}
@@ -229,7 +229,7 @@ def test_context_limit_is_explicit_not_silent_truncation(vault):
 
 
 def test_cli_proposes_without_applying_and_create_can_rollback(vault, capsys):
-    with patch.object(cli, "config", return_value=vault.cfg), patch("core.reconcile.call_chat_completion", provider("create")):
+    with patch.object(cli, "config", return_value=vault.cfg), patch("core.reconcile.llm_generate", provider("create")):
         assert cli.main(["Evidence", "--source", "raw/a.md"]) == 0
     assert "dry-run" in capsys.readouterr().out
     paths = list(steward.plan_dir(vault.cfg).glob("*.json"))

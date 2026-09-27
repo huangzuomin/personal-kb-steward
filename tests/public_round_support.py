@@ -632,7 +632,7 @@ def run_public_round(output_dir: Path | None = None) -> dict[str, Any]:
     # function execute() itself calls); rendered source Markdown comes from
     # the executor's own render path.
     source_module = load_source_executor_module()
-    orig_provider = source_module.call_chat_completion
+    orig_provider = source_module.llm_generate
     orig_analyze = source_module.analyze_note
     captured_analysis: dict[str, dict[str, Any]] = {}
 
@@ -642,7 +642,7 @@ def run_public_round(output_dir: Path | None = None) -> dict[str, Any]:
             captured_analysis[str(note["rel"])] = data
         return data
 
-    source_module.call_chat_completion = provider
+    source_module.llm_generate = provider
     source_module.analyze_note = wrapped_analyze
     try:
         source_run = source_module.execute({
@@ -650,7 +650,7 @@ def run_public_round(output_dir: Path | None = None) -> dict[str, Any]:
             "config": {}, "use_llm": True,
         })
     finally:
-        source_module.call_chat_completion = orig_provider
+        source_module.llm_generate = orig_provider
         source_module.analyze_note = orig_analyze
 
     # -- seed stage: the ACTUAL mindseed-grow executor (atomic mode) --

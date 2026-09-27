@@ -33,6 +33,11 @@
       "match_any": ["初始化知识库", "初始化", "全量整理", "初始化整理", "init-kb"]
     },
     {
+      "entry": "compile_research",
+      "primary_skill": "topic-research-compile",
+      "match_any": ["长文", "研报", "研究汇编", "编译研究", "整理 raw", "提炼全文", "topic-research", "research compile"]
+    },
+    {
       "entry": "organize_kb",
       "primary_skill": "mindseed-grow",
       "match_any": ["整理知识库", "整理", "碎片", "随手记", "quicknote", "inbox", "seed", "生长"]
@@ -48,7 +53,7 @@
     "claim-evidence-checker": "prepare_writing",
     "case-story-bank-builder": "prepare_writing",
     "project-review-synthesizer": "weave_work_memory",
-    "topic-research-compile": "discover_topics",
+    "topic-research-compile": "compile_research",
     "mindseed-grow": "organize_kb",
     "kb-initialize": "init_kb"
   }

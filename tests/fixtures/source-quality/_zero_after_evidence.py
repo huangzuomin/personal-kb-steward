@@ -45,7 +45,7 @@ def zero_provider(cfg, system, payload):
                        "quality_flags": []}, ensure_ascii=False)
 
 
-with patch.dict(EXEC.execute.__globals__, {"call_chat_completion": zero_provider}):
+with patch.dict(EXEC.execute.__globals__, {"llm_generate": zero_provider}):
     result = EXEC.execute({"notes": [canonical("neg_irrelevant")],
                            "config": CFG, "use_llm": True})
 out["neg_irrelevant_explicit_zero"] = {
@@ -65,7 +65,7 @@ def old_provider(cfg, system, payload):
                       ensure_ascii=False)
 
 
-with patch.dict(EXEC.execute.__globals__, {"call_chat_completion": old_provider}):
+with patch.dict(EXEC.execute.__globals__, {"llm_generate": old_provider}):
     result = EXEC.execute({"notes": [canonical("neg_irrelevant")],
                            "config": CFG, "use_llm": True})
 out["neg_irrelevant_old_contract_response"] = {

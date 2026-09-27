@@ -207,7 +207,7 @@ def test_cli_is_readonly_without_models_or_queue_entries(vault, capsys):
     raw = vault.root / 'raw/a.md'
     raw.write_bytes(raw.read_bytes() + b'\nChanged')
     before = snapshot(vault.root)
-    with patch.object(cli, 'config', return_value=vault.cfg), patch('core.reconcile.call_chat_completion') as model:
+    with patch.object(cli, 'config', return_value=vault.cfg), patch('core.reconcile.llm_generate') as model:
         for args in [['stale'], ['impact', 'raw/a.md']]:
             assert cli.main(args) == 0
         model.assert_not_called()

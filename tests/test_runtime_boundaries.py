@@ -17,8 +17,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
 
     def test_runner_is_smaller_after_phase_14(self):
         line_count = len((ROOT / "scripts" / "personal_kb_steward.py").read_text(encoding="utf-8").splitlines())
-        # v0.3: review 子命令扩展后上限调整
-        self.assertLess(line_count, 1700)
+        # v0.3: review 子命令扩展后上限调整；Patch L: llm-check 子命令接线后上限调整
+        self.assertLess(line_count, 1750)
 
     def test_review_queue_module_exists(self):
         from core import review_queue

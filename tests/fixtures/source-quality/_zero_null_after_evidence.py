@@ -40,7 +40,7 @@ def null_provider(cfg, system, payload):
                       ensure_ascii=False)
 
 
-with patch.dict(EXEC.execute.__globals__, {"call_chat_completion": null_provider}):
+with patch.dict(EXEC.execute.__globals__, {"llm_generate": null_provider}):
     result = EXEC.execute({"notes": [note], "config": CFG, "use_llm": True})
 out = {
     "present_null_viability_accepted": False,

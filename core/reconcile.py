@@ -16,7 +16,7 @@ from typing import Any, Callable
 from .claims import EvidenceError, compile_claims, render_claims, validate_claims
 from .config import sha256_text
 from .knowledge_objects import ObjectIdentityError
-from .llm import call_chat_completion
+from .llm import llm_generate
 from .markdown import frontmatter
 from .plan_objects import update_base
 from .vault import Note, VaultIndex, build_index, parse_frontmatter, read_note
@@ -221,7 +221,7 @@ def make_reconcile_plan(cfg: dict[str, Any], topic: str, sources: list[str], *,
         request_size = len(json.dumps(synthesis_request, ensure_ascii=False)) if synthesis_request else 0
         if len(original) + sum(len(d["content"]) for d in documents) + request_size > limit:
             raise ReconcileConflict(f"完整上下文超过 {limit} 字符，请先提炼来源笔记或减少资料；不静默截断")
-        response = (completion or call_chat_completion)(cfg, _PROMPT, {
+        response = (completion or llm_generate)(cfg, _PROMPT, {
             "topic": existing.title if existing else topic.strip(), "target_exists": existing is not None,
             "current_page": original, "sources": documents,
             **({"synthesis_request": synthesis_request} if synthesis_request is not None else {}),

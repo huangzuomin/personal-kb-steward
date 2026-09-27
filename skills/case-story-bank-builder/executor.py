@@ -4,7 +4,7 @@ Delegates to the SHARED typed pipeline (core.card_pipeline.discover_cards)
 for cases only, over persisted-source eligibility collected from the provided
 vault index. No alternate writer, no second identity authority, no direct
 model calls: the provider is injectable through context["providers"] and
-otherwise defaults to core.llm.call_chat_completion inside the generator.
+otherwise defaults to core.llm.llm_generate inside the generator.
 
 Expected context: {"config", "vault_index", "use_llm", "run_id"?, "providers"?}.
 Returns a typed executor envelope whose "planned_pages" are ordinary plan page

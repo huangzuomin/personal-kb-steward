@@ -6,7 +6,7 @@ from typing import Any
 
 from .json_contract import apply_contract_defaults, extract_json, validate_contract
 from .card_contracts import SKILL_CARD_TYPES, prepare_card_item, validate_skill_payload
-from .llm import LLMError, call_chat_completion, mock_skill_response
+from .llm import LLMError, llm_generate, mock_skill_response
 from .renderer import render_previews
 from .skill_loader import build_system_prompt, load_skill
 from .validator import canonicalize_related_links, validate_skill_items
@@ -91,7 +91,7 @@ def run_skill_runtime(
             data = mock_skill_response(skill_name, task, documents)
             raw_text = json.dumps(data, ensure_ascii=False)
         else:
-            raw_text = call_chat_completion(cfg, build_system_prompt(spec, contract), payload)
+            raw_text = llm_generate(cfg, build_system_prompt(spec, contract), payload)
             data = extract_json(raw_text)
     except (LLMError, json.JSONDecodeError, FileNotFoundError, KeyError) as exc:
         return {

@@ -69,7 +69,7 @@ class SourceExecutorGateTests(unittest.TestCase):
 
     def test_damaged_input_blocked_before_provider_with_no_card(self):
         provider, calls = zero_call_recorder()
-        with patch.dict(SRC.__globals__, {"call_chat_completion": provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": provider}):
             result = SRC({"notes": [damaged_note()], "config": self.CFG,
                           "use_llm": True})
         self.assertEqual(calls, [])  # sentinel provider never invoked
@@ -84,7 +84,7 @@ class SourceExecutorGateTests(unittest.TestCase):
                  "source_text": "这是足够长的一句话，包含事实。",
                  "source_sha256": hashlib.sha256("这是足够长的一句话，包含事实。".encode("utf-8")).hexdigest()}
         provider, calls = zero_call_recorder()
-        with patch.dict(SRC.__globals__, {"call_chat_completion": provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": provider}):
             result = SRC({"notes": [clean, damaged_note()],
                           "config": self.CFG, "use_llm": False})
         self.assertEqual(result["processed"], 1)  # only the clean source
@@ -103,7 +103,7 @@ class SourceExecutorGateTests(unittest.TestCase):
                                "unused": {"nested": "�"},
                                "limitations": [], "quality_flags": []})
 
-        with patch.dict(SRC.__globals__, {"call_chat_completion": damaged_provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": damaged_provider}):
             data = SRC.__globals__["analyze_note"](note, self.CFG, use_llm=True)
         self.assertEqual(data["status"], "partial")
         self.assertEqual(data["analysis_mode"], "heuristic-fallback")

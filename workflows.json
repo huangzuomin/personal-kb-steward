@@ -71,6 +71,16 @@
       "follow_up_skills": [],
       "writes_by_default": ["outputs", "log.md"],
       "risk_policy": "只自动生成报告；合并、删除、重命名、改结论必须进入人工确认。"
+    },
+    "compile_research": {
+      "label": "整理 raw 长文",
+      "description": "把 raw 长文按主题编译为可追溯 source note；必须由 LLM 分析，非 LLM 模式如实 blocked。",
+      "aliases": ["整理长文", "研报整理", "研究汇编"],
+      "primary_skill": "topic-research-compile",
+      "pipeline": ["topic-research-compile"],
+      "follow_up_skills": [],
+      "writes_by_default": ["wiki/sources"],
+      "risk_policy": "source note 一律 dry-run 计划 + review 后 apply；raw 原文不可改写。"
     }
   }
 }

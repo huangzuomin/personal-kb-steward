@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.llm import call_chat_completion
+from core.llm import llm_generate
 
 def execute(context: dict[str, Any]) -> dict[str, Any]:
     notes = context.get("notes", [])
@@ -45,7 +45,7 @@ def execute(context: dict[str, Any]) -> dict[str, Any]:
     for note in notes:
         text = f"Title: {note.get('title', '')}\n\n{note.get('body', '')[:3000]}"
         try:
-            resp = call_chat_completion(cfg, system_prompt, {"text": text})
+            resp = llm_generate(cfg, system_prompt, {"text": text})
             data = json.loads(resp)
             category = data.get("category", "unclear")
             if category in routing_map:

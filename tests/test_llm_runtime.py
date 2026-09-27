@@ -51,7 +51,7 @@ class LlmRuntimeTests(unittest.TestCase):
             "title": "地方媒体AI转型战略规划",
             "content": "战略蓝图与后续反思。",
         }]
-        with patch("core.skill_runtime.call_chat_completion", return_value=json.dumps(payload, ensure_ascii=False)):
+        with patch("core.skill_runtime.llm_generate", return_value=json.dumps(payload, ensure_ascii=False)):
             result = run_skill_runtime(ROOT, {}, "topic-insight-miner", "发现选题", documents)
 
         self.assertTrue(result["ok"], result["issues"])
@@ -76,7 +76,7 @@ class LlmRuntimeTests(unittest.TestCase):
             {"path": "raw/a.md", "title": "同名资料", "content": "a"},
             {"path": "raw/b.md", "title": "同名资料", "content": "b"},
         ]
-        with patch("core.skill_runtime.call_chat_completion", return_value=json.dumps(payload, ensure_ascii=False)):
+        with patch("core.skill_runtime.llm_generate", return_value=json.dumps(payload, ensure_ascii=False)):
             result = run_skill_runtime(ROOT, {}, "topic-insight-miner", "发现选题", documents)
 
         self.assertFalse(result["ok"])
@@ -98,7 +98,7 @@ class LlmRuntimeTests(unittest.TestCase):
             }]
         }
         documents = [{"path": "raw/a.md", "title": "真实资料", "content": "a"}]
-        with patch("core.skill_runtime.call_chat_completion", return_value=json.dumps(payload, ensure_ascii=False)):
+        with patch("core.skill_runtime.llm_generate", return_value=json.dumps(payload, ensure_ascii=False)):
             result = run_skill_runtime(ROOT, {}, "topic-insight-miner", "发现选题", documents)
 
         self.assertFalse(result["ok"])

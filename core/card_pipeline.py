@@ -901,7 +901,7 @@ def discover_cards(index: VaultIndex, cfg: dict[str, Any], *, run_id: str,
         base_provider = (providers or {}).get(kind)
         if base_provider is None:
             # Resolved at call time so tests can patch the default provider seam.
-            base_provider = llm_module.call_chat_completion
+            base_provider = llm_module.llm_generate
         if kind == "topic":
             result = generators[kind](
                 stage_extras["question"], cfg, supplied, known_paths=known_paths,

@@ -43,7 +43,7 @@ def test_claim_evidence_roundtrip_audit_and_readonly_inspection(vault, capsys):
     audit = json.loads((vault.root / ".openclaw/runs/claim-test.json").read_text())
     assert audit["created"][0]["claim_ids"] == [record["claim_id"]]
     before = {p: p.read_bytes() for p in vault.root.rglob("*") if p.is_file()}
-    with patch.object(inspect_cli, "config", return_value=vault.cfg), patch("core.reconcile.call_chat_completion") as model:
+    with patch.object(inspect_cli, "config", return_value=vault.cfg), patch("core.reconcile.llm_generate") as model:
         assert inspect_cli.main([page["object_id"]]) == 0
         model.assert_not_called()
     output = capsys.readouterr().out
@@ -202,7 +202,7 @@ def test_legacy_plan_readable_and_explicit_reconcile_upgrades_only_selected_page
     review_apply(vault, upgraded)
     assert not inspect_cli.inspect(vault.cfg, page["object_id"])["legacy"]
     assert untouched.read_bytes() == before
-    with patch("core.reconcile.call_chat_completion") as model:
+    with patch("core.reconcile.llm_generate") as model:
         again = make_reconcile_plan(vault.cfg, "Evidence", ["raw/a.md"], plan_run_id="noop")
         assert again["reconcile"]["decision"] == "noop"
         model.assert_not_called()

@@ -950,6 +950,13 @@ def make_execution_plan(
         document_builder = retriever.documents if retriever.history else llm_documents
         docs = document_builder(input_notes, int(cfg["scan"].get("max_source_chars", 6000)),
                                 int(cfg["scan"].get("max_total_source_chars", 0)))
+        # Agent backend reads full originals through these absolute paths,
+        # bypassing the per-document excerpt budget; the api backend ignores
+        # the field and keeps its truncated content view.
+        _kb_home = kb_root(cfg)
+        for _doc in docs:
+            if isinstance(_doc, dict) and _doc.get("path") and "abs_path" not in _doc:
+                _doc["abs_path"] = str(_kb_home / str(_doc["path"]))
         llm_result = run_skill_runtime(ROOT, cfg, primary_skill, task, docs, mock=mock_llm)
         for action in actions:
             if action.get("operation") == "run_primary_skill":
@@ -1610,6 +1617,16 @@ def command_processed(cfg: dict[str, Any]) -> int:
     return 0
 
 
+def command_llm_check(cfg: dict[str, Any], backend: str | None = None) -> int:
+    """Probe the configured LLM backend; logic lives in core.agent_backend."""
+    from core.agent_backend import run_llm_probe
+
+    ok, lines = run_llm_probe(cfg, backend)
+    for line in lines:
+        print(line)
+    return 0 if ok else 1
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="个人知识库管家")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1667,6 +1684,9 @@ def main(argv: list[str]) -> int:
     review_scope.add_argument("--run-id", help="只应用这个完整 run_id，不能用前缀")
     review_scope.add_argument("--all", action="store_true", help="显式应用所有已批准且无阻塞项的 run")
     sub.add_parser("processed")
+    llm_check = sub.add_parser("llm-check", help="LLM 后端连通性探针；切换 llm.backend 后先跑这个")
+    llm_check.add_argument("--backend", choices=["api", "agent"], default=None,
+                           help="临时覆盖 llm.backend 进行探测，不修改配置文件")
     args = parser.parse_args(argv)
     cfg = config()
     if args.command == "status":
@@ -1693,6 +1713,8 @@ def main(argv: list[str]) -> int:
         return command_review(cfg, args)
     if args.command == "processed":
         return command_processed(cfg)
+    if args.command == "llm-check":
+        return command_llm_check(cfg, backend=args.backend)
     return 2
 
 if __name__ == "__main__":

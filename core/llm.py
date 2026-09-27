@@ -35,6 +35,21 @@ class LLMError(RuntimeError):
     pass
 
 
+def llm_generate(cfg: dict[str, Any], system_prompt: str, user_payload: dict[str, Any]) -> str:
+    """Single transport seam for every provider call. Dispatches on
+    llm.backend: "api" (default, historical behavior) uses
+    call_chat_completion; "agent" runs a headless agent CLI via
+    agent_backend.call_agent_cli. Same signature and return contract for
+    both, so callers and tests stay transport-agnostic."""
+    from .config import llm_backend
+
+    backend = llm_backend(cfg)
+    if backend == "agent":
+        from .agent_backend import call_agent_cli
+        return call_agent_cli(cfg, system_prompt, user_payload)
+    return call_chat_completion(cfg, system_prompt, user_payload)
+
+
 def mock_skill_response(skill: str, task: str, documents: list[dict[str, str]]) -> dict[str, Any]:
     sources = [doc["path"] for doc in documents[:5]]
     title_seed = task.strip() or (documents[0]["title"] if documents else skill)

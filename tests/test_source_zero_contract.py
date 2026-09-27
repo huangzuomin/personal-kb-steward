@@ -53,7 +53,7 @@ class ExplicitZeroTests(unittest.TestCase):
             calls.append(1)
             return zero_response("该来源为日常闲聊，无任何可沉淀的独立信息。")
 
-        with patch.dict(SRC.__globals__, {"call_chat_completion": provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": provider}):
             result = SRC({"notes": [canonical("neg_irrelevant")],
                           "config": CFG, "use_llm": True})
         self.assertEqual(len(calls), 1)  # actually read
@@ -80,7 +80,7 @@ class ExplicitZeroTests(unittest.TestCase):
                                "source_viable": False,
                                "reason": "无可沉淀的独立信息"}, ensure_ascii=False)
 
-        with patch.dict(SRC.__globals__, {"call_chat_completion": provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": provider}):
             result = SRC({"notes": [canonical("neg_irrelevant")],
                           "config": CFG, "use_llm": True})
         self.assertEqual(len(calls), 1)
@@ -96,7 +96,7 @@ class ExplicitZeroTests(unittest.TestCase):
             calls.append(1)
             return zero_response()
 
-        with patch.dict(SRC.__globals__, {"call_chat_completion": provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": provider}):
             result = SRC({"notes": [canonical("neg_empty")],
                           "config": CFG, "use_llm": True})
         self.assertEqual(calls, [])
@@ -137,7 +137,7 @@ class ExplicitZeroTests(unittest.TestCase):
             calls.append(1)
             return zero_response()
 
-        with patch.dict(SRC.__globals__, {"call_chat_completion": provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": provider}):
             result = SRC({"notes": [canonical("neg_damaged")],
                           "config": CFG, "use_llm": True})
         self.assertEqual(calls, [])
@@ -156,7 +156,7 @@ class ExplicitZeroTests(unittest.TestCase):
                                                   "kind": "assertion"}],
                               "topics": [], "limitations": [], "quality_flags": []},
                              ensure_ascii=False)
-        with patch.dict(SRC.__globals__, {"call_chat_completion": lambda *a: payload}):
+        with patch.dict(SRC.__globals__, {"llm_generate": lambda *a: payload}):
             data = SRC.__globals__["analyze_note"](note, CFG, use_llm=True)
         self.assertEqual(data["status"], "ok")
         self.assertEqual(len(data["key_facts"]), 1)  # repeats don't inflate units
@@ -175,7 +175,7 @@ class ExplicitZeroTests(unittest.TestCase):
                                    "quality_flags": []}, ensure_ascii=False)
             return zero_response("第一片段无可沉淀信息")
 
-        with patch.dict(SRC.__globals__, {"call_chat_completion": provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": provider}):
             data = SRC.__globals__["analyze_note"](note, cfg, use_llm=True)
         self.assertEqual(data["status"], "ok")
         self.assertEqual(data["coverage"], "full")
@@ -195,7 +195,7 @@ class ExplicitZeroTests(unittest.TestCase):
                 raise RuntimeError("chunk one dead")
             return zero_response("零片段")
 
-        with patch.dict(SRC.__globals__, {"call_chat_completion": provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": provider}):
             data = SRC.__globals__["analyze_note"](note, cfg, use_llm=True)
         self.assertGreaterEqual(len(calls), 2)  # failed chunk AND zero chunk both ran
         self.assertEqual(data["status"], "partial")
@@ -210,7 +210,7 @@ class ExplicitZeroTests(unittest.TestCase):
         def provider(cfg, system, payload):
             return zero_response("零片段")
 
-        with patch.dict(SRC.__globals__, {"call_chat_completion": provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": provider}):
             data = SRC.__globals__["analyze_note"](note, cfg, use_llm=True)
         self.assertEqual(data["status"], "partial")
         self.assertEqual(data["coverage"], "partial")
@@ -261,7 +261,7 @@ class ExplicitZeroTests(unittest.TestCase):
                 return positive_response("这是足够长的一句话，包含事实。")
             return zero_response("无可沉淀信息")
 
-        with patch.dict(SRC.__globals__, {"call_chat_completion": mixed_provider}):
+        with patch.dict(SRC.__globals__, {"llm_generate": mixed_provider}):
             result = SRC({"notes": [clean, canonical("neg_irrelevant")],
                           "config": CFG, "use_llm": True})
         self.assertEqual(result["processed"], 1)

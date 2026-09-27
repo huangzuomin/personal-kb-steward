@@ -99,7 +99,41 @@ def seed_generation_mode(cfg: dict[str, Any] | None) -> str:
     return mode
 
 
+LLM_BACKENDS = frozenset({"api", "agent"})
 CARD_PIPELINE_MODES = frozenset({"typed", "legacy"})
+
+
+def llm_backend(cfg: dict[str, Any] | None) -> str:
+    """LLM transport backend: "api" (OpenAI-compatible chat completions, the
+    historical behavior) or "agent" (headless agent CLI run in read-only
+    mode). Defaults to "api" whenever the key is absent, so legacy configs
+    are untouched. Present values are validated, never coerced — same
+    fail-closed contract as card_pipeline_mode/seed_generation_mode."""
+    if cfg is None or "llm" not in cfg:
+        return "api"
+    section = cfg.get("llm")
+    if not isinstance(section, dict):
+        raise ValueError(f"llm 必须是对象，当前为：{type(section).__name__}")
+    if "backend" not in section:
+        return "api"
+    backend = section["backend"]
+    if not isinstance(backend, str) or backend not in LLM_BACKENDS:
+        raise ValueError(f"llm.backend 只能是 api 或 agent，当前为：{backend!r}")
+    if backend == "agent":
+        agent = section.get("agent")
+        if not isinstance(agent, dict):
+            raise ValueError("llm.backend=agent 需要配置 llm.agent 对象")
+        command = agent.get("command")
+        if not isinstance(command, str) or not command.strip():
+            raise ValueError("llm.backend=agent 需要非空的 llm.agent.command")
+        args = agent.get("args", [])
+        if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+            raise ValueError("llm.agent.args 必须是字符串数组")
+        env_extra = agent.get("env", {})
+        if not isinstance(env_extra, dict) or not all(
+                isinstance(k, str) and isinstance(v, str) for k, v in env_extra.items()):
+            raise ValueError("llm.agent.env 必须是字符串到字符串的映射")
+    return backend
 
 
 def card_pipeline_mode(cfg: dict[str, Any] | None) -> str:

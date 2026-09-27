@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from core.llm import call_chat_completion
+from core.llm import llm_generate
 from core.jinja_renderer import require_renderer
 from core.content_safety import SensitiveContentError, assert_safe_content, safe_error_message
 from core.json_contract import extract_json
@@ -96,7 +96,7 @@ def _llm_chunk_analysis(norm_text: str, chunk_plan: dict[str, Any], cfg: dict[st
                   f"{chunk['start']}-{chunk['end']}，全文 {chunk_plan['total_chars']} 字符]\n\n")
         payload = header + chunk["text"]
         try:
-            resp = call_chat_completion(cfg, CHUNK_SYSTEM_PROMPT, {"text": payload})
+            resp = llm_generate(cfg, CHUNK_SYSTEM_PROMPT, {"text": payload})
             # Post-provider secret screening on the COMPLETE raw response,
             # including fields we never read. Provider results are untrusted.
             assert_safe_content(resp)

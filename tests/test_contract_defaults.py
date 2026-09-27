@@ -49,7 +49,7 @@ BASE_ITEM = {
 def _run(item):
     payload = {"items": [dict(item)]}
     with patch(
-        "core.skill_runtime.call_chat_completion",
+        "core.skill_runtime.llm_generate",
         return_value=json.dumps(payload, ensure_ascii=False),
     ):
         return run_skill_runtime(

@@ -35,7 +35,7 @@ def provider(*args, **kwargs):
     return "{}"
 
 
-with patch.dict(EXEC.execute.__globals__, {"call_chat_completion": provider}):
+with patch.dict(EXEC.execute.__globals__, {"llm_generate": provider}):
     result = EXEC.execute({"notes": [note], "config": {"source_analysis": {"chunk_chars": 4000,
                                                                 "max_chunks": 12},
                                               "write": {}}, "use_llm": True})

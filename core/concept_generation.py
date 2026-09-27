@@ -39,7 +39,7 @@ Return value (always a dict, never raises for input/protocol problems):
 Key guarantees (shared discipline lives in core.evidence_cards):
 - Single type truth: core/schemas/concept-page.schema.json is loaded and
   registered via core.card_contracts.register_card_schema; no Python copy.
-- ONE bounded provider call (injectable; default core.llm.call_chat_completion),
+- ONE bounded provider call (injectable; default core.llm.llm_generate),
   no hidden retries; secret screening pre and post; Jinja preflight first;
   oversized input rejected BEFORE the call, never truncated.
 - A single source can qualify a concept; there is deliberately NO minimum

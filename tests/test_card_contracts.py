@@ -253,7 +253,7 @@ def test_runtime_rejects_invalid_managed_card_before_previews():
     payload = {"items": [{
         "title": "坏状态", "type": "seed-card", "status": "compiled", "stage": "compiling",
         "sources": ["raw/a.md"], "summary": "s", "confidence": "low", "review_required": True}]}
-    with patch("core.skill_runtime.call_chat_completion", return_value=json.dumps(payload)):
+    with patch("core.skill_runtime.llm_generate", return_value=json.dumps(payload)):
         result = run_skill_runtime(ROOT, {}, "mindseed-grow", "整理知识库",
                                    [{"path": "raw/a.md", "title": "a", "content": "内容"}])
     assert not result["ok"] and result["issues"] and result["previews"] == []
@@ -264,7 +264,7 @@ def test_runtime_provider_network_is_never_touched_by_card_validation(monkeypatc
         raise AssertionError("network fetch attempted during card validation")
     monkeypatch.setattr("urllib.request.urlopen", forbidden)
     good = {"items": [valid_seed()]}
-    with patch("core.skill_runtime.call_chat_completion", return_value=json.dumps(good)):
+    with patch("core.skill_runtime.llm_generate", return_value=json.dumps(good)):
         result = run_skill_runtime(ROOT, {}, "mindseed-grow", "整理知识库",
                                    [{"path": "quicknote/a.md", "title": "a", "content": "内容"}])
     assert result["ok"], result["issues"]
@@ -448,7 +448,7 @@ def test_runtime_mock_provider_cannot_promote_forged_hashes_or_full_coverage():
         "source_hashes": {"quicknote/example.md": "a" * 64},
         "coverage": "full",
     }]}
-    with patch("core.skill_runtime.call_chat_completion", return_value=json.dumps(payload)):
+    with patch("core.skill_runtime.llm_generate", return_value=json.dumps(payload)):
         result = run_skill_runtime(
             ROOT, {"scan": {"max_source_chars": 6000}}, "mindseed-grow", "整理知识库",
             [{"path": "quicknote/example.md", "title": "example", "content": "hello"}])
@@ -486,7 +486,7 @@ def test_runtime_prompt_declares_content_requirements_for_managed_types():
     def model(cfg, prompt, payload):
         captured.append((prompt, payload))
         return json.dumps({"items": [valid_seed(signals=["来源摘句"], growth_directions=["生长方向"])]})
-    with patch("core.skill_runtime.call_chat_completion", side_effect=model):
+    with patch("core.skill_runtime.llm_generate", side_effect=model):
         result = run_skill_runtime(ROOT, {}, "mindseed-grow", "整理知识库", docs)
     assert result["ok"], result["issues"]
     prompt, payload = captured[0]
@@ -501,11 +501,11 @@ def test_runtime_prompt_declares_content_requirements_for_managed_types():
 def test_runtime_source_response_requires_content_fields_and_passes():
     docs = [{"path": "raw/a.md", "title": "a", "content": "长文内容"}]
     base = valid_source(sources=["raw/a.md"])
-    with patch("core.skill_runtime.call_chat_completion", return_value=json.dumps({"items": [base]})):
+    with patch("core.skill_runtime.llm_generate", return_value=json.dumps({"items": [base]})):
         result = run_skill_runtime(ROOT, {}, "topic-research-compile", "编译来源", docs)
     assert result["ok"], result["issues"]  # key_statements/topic_hints supplied
     incomplete = {k: v for k, v in base.items() if k not in ("key_statements", "topic_hints")}
-    with patch("core.skill_runtime.call_chat_completion", return_value=json.dumps({"items": [incomplete]})):
+    with patch("core.skill_runtime.llm_generate", return_value=json.dumps({"items": [incomplete]})):
         result = run_skill_runtime(ROOT, {}, "topic-research-compile", "编译来源", docs)
     assert not result["ok"] and result["previews"] == []
 

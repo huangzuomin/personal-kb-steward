@@ -277,7 +277,7 @@ def test_model_conflict_noop_or_summary_only_never_create_writable_pages(vault):
 def test_cli_preview_queues_review_without_writing_notes_or_calling_model_twice(vault, capsys):
     before = (vault.root / 'raw/a.md').read_bytes()
     completion = model()
-    with patch.object(cli, 'config', return_value=vault.cfg), patch('core.synthesis.call_chat_completion', completion):
+    with patch.object(cli, 'config', return_value=vault.cfg), patch('core.synthesis.llm_generate', completion):
         assert cli.main(['evidence implications', '--topic', 'Evidence', '--discussion', 'Compare observations']) == 0
     assert completion.call_count == 1
     output = capsys.readouterr().out

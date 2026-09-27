@@ -67,7 +67,7 @@ def _llm_cluster(inputs: list[ClusterInput], cfg: dict, max_clusters: int,
     """调用 LLM 进行语义聚类，失败返回 None。"""
     try:
         import json
-        from .llm import LLMError, call_chat_completion
+        from .llm import LLMError, llm_generate
         from .json_contract import extract_json
     except ImportError:
         return None
@@ -84,7 +84,7 @@ def _llm_cluster(inputs: list[ClusterInput], cfg: dict, max_clusters: int,
     try:
         if call_counter is not None:
             call_counter[0] += 1
-        raw = call_chat_completion(cfg, _CLUSTER_SYSTEM_PROMPT, payload)
+        raw = llm_generate(cfg, _CLUSTER_SYSTEM_PROMPT, payload)
         data = extract_json(raw)
     except SensitiveContentError:
         raise

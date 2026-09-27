@@ -186,14 +186,14 @@ def test_llm_prompt_types_follow_the_skill_and_invalid_shapes_are_reported():
     docs = [{"path": "raw/a.md", "title": "source", "content": "facts"}]
     good = {"items": [{"title": "Seed", "type": "seed-card", "status": "seed", "stage": "candidate",
                        "sources": ["raw/a.md"], "summary": "Summary", "confidence": "medium", "review_required": True}]}
-    with patch("core.skill_runtime.call_chat_completion", return_value=json.dumps(good)) as model:
+    with patch("core.skill_runtime.llm_generate", return_value=json.dumps(good)) as model:
         result = run_skill_runtime(ROOT, {}, "mindseed-grow", "整理知识库", docs)
         assert result["ok"]
         assert "固定 topic-card" not in model.call_args.args[1]
         assert "固定 topic-card" not in str(model.call_args.args[2]["output_contract"])
     for bad in ([], None, {"items": [None]}, {"items": [{**good["items"][0], "related": None}]},
                 {"items": [{**good["items"][0], "sources": [None]}]}):
-        with patch("core.skill_runtime.call_chat_completion", return_value=json.dumps(bad)):
+        with patch("core.skill_runtime.llm_generate", return_value=json.dumps(bad)):
             result = run_skill_runtime(ROOT, {}, "mindseed-grow", "整理知识库", docs)
         assert not result["ok"] and result["issues"] and not result["previews"]
 
@@ -278,7 +278,7 @@ def test_real_llm_topic_plan_enforces_config_budget_and_canonical_related(vault)
         return json.dumps({"items": [{"title": "Real model content", "type": "topic-card", "status": "growing",
                     "stage": "candidate", "sources": paths, "summary": "Different from executor template.",
                     "confidence": "medium", "review_required": True, "related": ["[[a]]"]}]})
-    with patch("core.skill_runtime.call_chat_completion", side_effect=model):
+    with patch("core.skill_runtime.llm_generate", side_effect=model):
         proposal = steward.make_execution_plan(vault.cfg, "发现选题 media AI", use_llm=True, include_all=True)
     assert len(captured) == 1
     assert sum(len(d["content"]) for d in captured[0]["documents"]) <= 1100
