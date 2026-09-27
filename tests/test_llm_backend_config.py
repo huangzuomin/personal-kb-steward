@@ -56,7 +56,12 @@ class LlmBackendTests(unittest.TestCase):
 
     def test_live_config_parses(self):
         import json
-        data = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+        live = ROOT / "config.json"
+        if not live.exists():
+            # CI and fresh clones run without a local config; the value of
+            # this check only exists when one is present.
+            self.skipTest("no live config.json (expected on CI/fresh clones)")
+        data = json.loads(live.read_text(encoding="utf-8-sig"))
         self.assertIn(llm_backend(data), {"api", "agent"})
 
     def test_example_config_defaults_to_api_and_documents_agent_template(self):
