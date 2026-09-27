@@ -278,7 +278,7 @@ def prepare_vault(vault: Path, artifact_root: Path | None = None) -> None:
         target.write_bytes(snap.path.read_bytes())  # EXACT raw bytes
 
 
-def build_cfg(vault: Path) -> dict[str, Any]:
+def build_cfg(vault: Path, excerpt_budget: int = 6000) -> dict[str, Any]:
     """Fixed nonsecret synthetic config built in code (repo example template,
     paths redirected into the isolated vault; never the user's config.json)."""
     import json as _json
@@ -288,6 +288,11 @@ def build_cfg(vault: Path) -> dict[str, Any]:
     cfg["state_file"] = str(vault / ".openclaw" / "state.json")
     cfg["scan"]["include_dirs"] = ["raw", "quicknote"]
     cfg["scan"]["max_files_per_run"] = 20
+    # Per-document source excerpt budget fed to the model (api backend reads
+    # truncated excerpts; agent backend bypasses it via abs_path). Parameterized
+    # so black-box comparisons can test whether a larger budget closes the
+    # quality gap against full-original reads.
+    cfg["scan"]["max_source_chars"] = int(excerpt_budget)
     cfg["seed_generation"] = {"mode": "atomic"}
     cfg["card_pipeline"] = {"mode": "typed", "topic_questions": [TOPIC_QUESTION]}
     safety = cfg.setdefault("safety", {})
@@ -1194,7 +1199,8 @@ def run_round(round_index: int, artifact_root: Path, mode: str,
               frozen: dict[str, str], *, intake_only: bool = False,
               max_round_calls: int = HARD_MAX_CALLS_PER_ROUND,
               max_total_calls: int = HARD_MAX_TOTAL_CALLS,
-              total_attempts_before: int = 0) -> dict[str, Any]:
+              total_attempts_before: int = 0,
+              excerpt_budget: int = 6000) -> dict[str, Any]:
     if not (1 <= max_round_calls <= HARD_MAX_CALLS_PER_ROUND):
         raise RunnerError(
             f"max_round_calls must be between 1 and {HARD_MAX_CALLS_PER_ROUND}")
@@ -1204,7 +1210,7 @@ def run_round(round_index: int, artifact_root: Path, mode: str,
     verify_versions(frozen)
     vault = artifact_root / "rounds" / f"round-{round_index:02d}" / "vault"
     prepare_vault(vault, artifact_root)
-    cfg = build_cfg(vault)
+    cfg = build_cfg(vault, excerpt_budget=excerpt_budget)
     fixture_hashes = _fixture_hashes()
     source_before = _source_bytes(vault)
 
@@ -1522,6 +1528,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-total-calls", type=int, default=30)
     parser.add_argument("--max-round-calls", type=int, default=10)
     parser.add_argument("--timeout-seconds", type=int, default=600)
+    parser.add_argument("--excerpt-budget", type=int, default=6000,
+                        help="scan.max_source_chars 覆盖：每文档喂给模型的摘录字符预算 "
+                             "(默认 6000，与生产一致；调大用于黑盒对比实验)")
     args = parser.parse_args(argv)
 
     if not (1 <= args.max_round_calls <= HARD_MAX_CALLS_PER_ROUND):
@@ -1579,6 +1588,7 @@ def main(argv: list[str] | None = None) -> int:
     report: dict[str, Any] = {
         "mode": mode, "rounds_requested": args.rounds,
         "target_calls_per_round": TARGET_CALLS_PER_ROUND,
+        "excerpt_budget": args.excerpt_budget,
         "hard_bounds": {"per_round": args.max_round_calls,
                         "total": args.max_total_calls},
         "semantic_pass": None,
@@ -1602,7 +1612,8 @@ def main(argv: list[str] | None = None) -> int:
                                intake_only=args.intake_only,
                                max_round_calls=args.max_round_calls,
                                max_total_calls=args.max_total_calls,
-                               total_attempts_before=total_attempts)
+                               total_attempts_before=total_attempts,
+                               excerpt_budget=args.excerpt_budget)
             report["rounds"].append(result)
             total_attempts += result.get("provider_calls", 0)
             if result["outcome"] != "complete":
