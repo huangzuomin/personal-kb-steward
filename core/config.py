@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -134,6 +135,26 @@ def llm_backend(cfg: dict[str, Any] | None) -> str:
                 isinstance(k, str) and isinstance(v, str) for k, v in env_extra.items()):
             raise ValueError("llm.agent.env 必须是字符串到字符串的映射")
     return backend
+
+
+def override_llm_backend(cfg: dict[str, Any], backend: str) -> dict[str, Any]:
+    """Return a copy of cfg with ``llm.backend`` replaced by ``backend``.
+
+    Powers the CLI ``--backend`` flag: per-command override without touching
+    config.json. The replacement value is validated exactly like a
+    config-file value (anything but "api"/"agent" raises ValueError); the
+    input cfg is never mutated. Full agent-config validation still happens
+    downstream in llm_backend() — fail-closed as usual.
+    """
+    if not isinstance(backend, str) or backend not in LLM_BACKENDS:
+        raise ValueError(f"llm.backend 只能是 api 或 agent，当前为：{backend!r}")
+    new_cfg = copy.deepcopy(cfg)
+    section = new_cfg.get("llm")
+    if not isinstance(section, dict):
+        section = {}
+        new_cfg["llm"] = section
+    section["backend"] = backend
+    return new_cfg
 
 
 def card_pipeline_mode(cfg: dict[str, Any] | None) -> str:

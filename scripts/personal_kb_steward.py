@@ -71,6 +71,7 @@ from core.safety import (
 from core.config import (
     config,
     kb_root,
+    override_llm_backend,
     plan_dir,
     processed_index_path,
     read_json,
@@ -1617,11 +1618,11 @@ def command_processed(cfg: dict[str, Any]) -> int:
     return 0
 
 
-def command_llm_check(cfg: dict[str, Any], backend: str | None = None) -> int:
+def command_llm_check(cfg: dict[str, Any]) -> int:
     """Probe the configured LLM backend; logic lives in core.agent_backend."""
     from core.agent_backend import run_llm_probe
 
-    ok, lines = run_llm_probe(cfg, backend)
+    ok, lines = run_llm_probe(cfg)
     for line in lines:
         print(line)
     return 0 if ok else 1
@@ -1641,18 +1642,24 @@ def main(argv: list[str]) -> int:
     plan.add_argument("--llm", action="store_true", help="加载 SKILL.md 并调用 LLM Skill Runtime")
     plan.add_argument("--mock-llm", action="store_true", help="使用 mock LLM 运行 Skill Runtime")
     plan.add_argument("--all", action="store_true", help="初始整理模式：扫描全部笔记，而不只看本轮变更")
+    plan.add_argument("--backend", choices=["api", "agent"], default=None,
+                      help="临时覆盖 llm.backend，不修改配置文件")
     plan.add_argument("text", nargs="+")
     task = sub.add_parser("task")
     task.add_argument("--apply", action="store_true", help="执行写入；默认只生成 dry-run plan")
     task.add_argument("--llm", action="store_true", help="加载 SKILL.md 并调用 LLM Skill Runtime；仅 dry-run plan 生效")
     task.add_argument("--mock-llm", action="store_true", help="使用 mock LLM 运行 Skill Runtime；仅 dry-run plan 生效")
     task.add_argument("--all", action="store_true", help="初始整理模式：扫描全部笔记，而不只看本轮变更")
+    task.add_argument("--backend", choices=["api", "agent"], default=None,
+                      help="临时覆盖 llm.backend，不修改配置文件")
     task.add_argument("text", nargs="+")
     init_kb = sub.add_parser("init-kb", help="分批初始化知识库，生成 pipeline plan")
     init_kb.add_argument("--batch-size", type=int, default=6, help="每批 raw 长文数量，默认 6")
     init_kb.add_argument("--no-llm", action="store_true", help="不调用 LLM，使用启发式整理并标记质量风险")
     init_kb.add_argument("--apply", action="store_true", help="按批次生成并应用初始化计划，直到无新增页或达到批次数上限")
     init_kb.add_argument("--max-batches", type=int, default=20, help="--apply 最多连续处理的批次数，默认 20")
+    init_kb.add_argument("--backend", choices=["api", "agent"], default=None,
+                         help="临时覆盖 llm.backend，不修改配置文件")
     finalize = sub.add_parser("finalize-kb", help="跨 source-note 聚合并补 related 链接")
     finalize.add_argument("--no-llm", action="store_true", help="不调用 LLM；类型化发现如实记录 blocked/not_configured，不声称生成")
     finalize.add_argument("--apply", action="store_true", help="应用 finalize 计划")
@@ -1689,6 +1696,11 @@ def main(argv: list[str]) -> int:
                            help="临时覆盖 llm.backend 进行探测，不修改配置文件")
     args = parser.parse_args(argv)
     cfg = config()
+    # --backend：按次覆盖 llm.backend（plan/task/init-kb/llm-check），
+    # 作用在配置副本上，不写回 config.json。
+    backend_override = getattr(args, "backend", None)
+    if backend_override:
+        cfg = override_llm_backend(cfg, backend_override)
     if args.command == "status":
         return command_status(cfg)
     if args.command == "run":
@@ -1714,7 +1726,7 @@ def main(argv: list[str]) -> int:
     if args.command == "processed":
         return command_processed(cfg)
     if args.command == "llm-check":
-        return command_llm_check(cfg, backend=args.backend)
+        return command_llm_check(cfg)
     return 2
 
 if __name__ == "__main__":
