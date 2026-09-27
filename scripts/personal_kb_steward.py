@@ -1156,11 +1156,20 @@ def command_init_kb(
     no_llm: bool = False,
     apply: bool = False,
     max_batches: int = 20,
+    critic: bool = False,
+    critic_backend: str | None = None,
 ) -> int:
     applied_batches = 0
     limit = max(1, max_batches)
     for batch_index in range(limit):
         plan = build_initialization_plan(cfg, plan_run_id=run_id(), stamp=stamp(), executor_plan_fn=mvp_executor_plan, page_requires_manual_review=page_requires_manual_review, duplicate_page_targets=duplicate_page_targets, page_has_blocked_placeholder=lambda p: page_has_blocked_placeholder(p, cfg), planned_raw_coverage=planned_raw_coverage, batch_size=batch_size, use_llm=use_llm and not no_llm, include_all=True)
+        if critic:
+            from core.semantic_critic import apply_semantic_critic
+            critic_cfg = override_llm_backend(cfg, critic_backend) if critic_backend else cfg
+            stats = apply_semantic_critic(cfg, critic_cfg, plan)
+            print(f"语义校验：检查 {stats['checked']} 页，通过 {stats['passed']}，"
+                  f"flag {stats['flagged']}，block {stats['blocked']}，"
+                  f"校验失败 {stats['errors']}，跳过 {stats['skipped']}")
         path = write_execution_plan(cfg, plan)
         queued = write_manual_review_queue(cfg, plan)
         print_plan_summary(plan, path, queued)
@@ -1660,6 +1669,10 @@ def main(argv: list[str]) -> int:
     init_kb.add_argument("--max-batches", type=int, default=20, help="--apply 最多连续处理的批次数，默认 20")
     init_kb.add_argument("--backend", choices=["api", "agent"], default=None,
                          help="临时覆盖 llm.backend，不修改配置文件")
+    init_kb.add_argument("--critic", action="store_true",
+                         help="生成计划后运行语义校验层（generator-critic），有异议的页面进入人工复核")
+    init_kb.add_argument("--critic-backend", choices=["api", "agent"], default=None,
+                         help="校验器专用的后端（默认跟随 --backend/配置）；常用 --critic --critic-backend agent")
     finalize = sub.add_parser("finalize-kb", help="跨 source-note 聚合并补 related 链接")
     finalize.add_argument("--no-llm", action="store_true", help="不调用 LLM；类型化发现如实记录 blocked/not_configured，不声称生成")
     finalize.add_argument("--apply", action="store_true", help="应用 finalize 计划")
@@ -1714,7 +1727,7 @@ def main(argv: list[str]) -> int:
     if args.command == "task":
         return command_task(cfg, " ".join(args.text), apply=args.apply, use_llm=args.llm, mock_llm=args.mock_llm, include_all=args.all)
     if args.command == "init-kb":
-        return command_init_kb(cfg, batch_size=args.batch_size, no_llm=args.no_llm, apply=args.apply, max_batches=args.max_batches)
+        return command_init_kb(cfg, batch_size=args.batch_size, no_llm=args.no_llm, apply=args.apply, max_batches=args.max_batches, critic=args.critic, critic_backend=args.critic_backend)
     if args.command == "finalize-kb":
         return command_finalize_kb(cfg, apply=args.apply, no_llm=args.no_llm)
     if args.command == "apply-plan":
