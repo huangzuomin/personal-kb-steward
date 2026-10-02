@@ -104,11 +104,16 @@ def _build_registry() -> Registry:
 
 
 def _validator_for(schema: dict[str, Any], schema_id: str | None = None) -> Draft202012Validator:
-    registry = _build_registry()
-    if schema_id and schema_id not in _STORE._schemas:
-        registry = registry.with_resource(
-            schema_id, Resource.from_contents(schema, default_specification=DRAFT202012))
-    return Draft202012Validator(schema, registry=registry)
+    try:
+        registry = _build_registry()
+        if schema_id and schema_id not in _STORE._schemas:
+            registry = registry.with_resource(
+                schema_id, Resource.from_contents(schema, default_specification=DRAFT202012))
+        return Draft202012Validator(schema, registry=registry)
+    except TypeError:
+        # jsonschema < 4.18 does not accept `registry` kwarg; fall back to
+        # plain validator (no cross-schema $ref resolution).
+        return Draft202012Validator(schema)
 
 
 def _schema_for_card_type(card_type: str) -> dict[str, Any] | None:

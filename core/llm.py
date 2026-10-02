@@ -5,8 +5,10 @@ import json
 import math
 import os
 import socket
+import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -99,10 +101,14 @@ def call_chat_completion(cfg: dict[str, Any], system_prompt: str, user_payload: 
     api_key_env = llm_cfg.get("api_key_env")
     if not api_key and api_key_env:
         api_key = os.environ.get(str(api_key_env))
+    # Vault-backed credential (e.g. "custom.deepseek"): the raw key is never
+    # read into this process. A hsurr:* surrogate is attached to the request
+    # and authd swaps it for the real credential on approved egress.
+    api_key_vault = llm_cfg.get("api_key_vault")
     if not model:
         raise LLMError("Missing LLM model. Set OPENAI_MODEL (legacy LLM_MODEL is also accepted) or llm.model.")
-    if not api_key:
-        raise LLMError("Missing API key. Set OPENAI_API_KEY or llm.api_key_env.")
+    if not api_key and not api_key_vault:
+        raise LLMError("Missing API key. Set OPENAI_API_KEY, llm.api_key_env, or llm.api_key_vault.")
 
     try:
         timeout_value = llm_cfg.get("timeout_seconds", 300)
@@ -126,12 +132,17 @@ def call_chat_completion(cfg: dict[str, Any], system_prompt: str, user_payload: 
     req = urllib.request.Request(
         base_url.rstrip("/") + "/chat/completions",
         data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers={"Content-Type": "application/json"},
         method="POST",
     )
+    if api_key_vault:
+        sys.path.insert(0, "/opt/hatch/skills/skill-creator/bin")
+        from dynamic_credentials import add_surrogate_to_request
+        host = urllib.parse.urlparse(base_url).hostname or ""
+        add_surrogate_to_request(req, str(api_key_vault),
+                                 allowed_hosts=[host] if host else [])
+    else:
+        req.add_header("Authorization", f"Bearer {api_key}")
     started = time.monotonic()
     deadline = started + policy.retry_budget_seconds
 
